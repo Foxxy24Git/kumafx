@@ -6,7 +6,125 @@ const {
     applyClusterRepulsion,
     applyCenterGravity,
     applySpringForce,
+    applyLeafClusterGravity,
+    getClusterRepulsion,
+    getClusterSpringStrength,
+    computeRadialLayout,
+    dragGroupWithChildren,
 } = require("../../src/noc-graph-cluster.js");
+
+describe("drag group with children", () => {
+    it("moves children proportionally when a group is dragged", () => {
+        const group = { id: "GRP_A", group: "A", x: 100, y: 100, vx: 0, vy: 0 };
+        const child1 = { id: "C1", group: "A", x: 120, y: 100, vx: 0, vy: 0 };
+        const child2 = { id: "C2", group: "A", x: 80, y: 100, vx: 0, vy: 0 };
+        const otherChild = { id: "C3", group: "B", x: 50, y: 50, vx: 0, vy: 0 };
+        const allNodes = [group, child1, child2, otherChild];
+
+        dragGroupWithChildren(group, 150, 150, allNodes);
+
+        assert.strictEqual(group.x, 150);
+        assert.strictEqual(group.y, 150);
+        assert.strictEqual(child1.x, 170);
+        assert.strictEqual(child1.y, 150);
+        assert.strictEqual(child2.x, 130);
+        assert.strictEqual(child2.y, 150);
+        assert.strictEqual(otherChild.x, 50);
+        assert.strictEqual(otherChild.y, 50);
+    });
+});
+
+describe("NOC graph radial layout", () => {
+    it("places groups evenly around origin at given orbit radius", () => {
+        const groups = ["A", "B", "C", "D"];
+        const members = { A: 5, B: 3, C: 8, D: 2 };
+        const result = computeRadialLayout(groups, members, { groupOrbit: 250, leafOrbit: 80 });
+        assert.strictEqual(result.size, 4);
+        const posA = result.get("A");
+        assert.ok(posA);
+        assert.ok(Math.abs(Math.hypot(posA.x, posA.y) - 250) < 1);
+    });
+
+    it("places leaf nodes in a ring around their parent group", () => {
+        const groups = ["X"];
+        const members = { X: 6 };
+        const result = computeRadialLayout(groups, members, { groupOrbit: 200, leafOrbit: 70 });
+        const pos = result.get("X");
+        assert.strictEqual(pos.children.length, 6);
+        pos.children.forEach(child => {
+            const dist = Math.hypot(child.x - pos.x, child.y - pos.y);
+            assert.ok(Math.abs(dist - 70) < 1, `child distance ${dist} should be ~70`);
+        });
+    });
+
+    it("ensures no two groups share the same angle", () => {
+        const groups = ["A", "B", "C"];
+        const members = { A: 1, B: 1, C: 1 };
+        const result = computeRadialLayout(groups, members, { groupOrbit: 200, leafOrbit: 60 });
+        const angles = [];
+        for (const [, pos] of result) {
+            angles.push(Math.atan2(pos.y, pos.x));
+        }
+        for (let i = 0; i < angles.length; i++) {
+            for (let j = i + 1; j < angles.length; j++) {
+                assert.ok(Math.abs(angles[i] - angles[j]) > 0.1);
+            }
+        }
+    });
+});
+
+describe("NOC graph cluster balancing", () => {
+    it("separates overlapping nodes within the same cluster", () => {
+        const first = { id: "a", type: "ATM", x: 100, y: 0, vx: 0, vy: 0, radius: 4.5 };
+        const second = { id: "b", type: "KANTOR", x: 100, y: 0, vx: 0, vy: 0, radius: 8 };
+        applyClusterRepulsion([first, second], { kRepel: 200, minGap: 6 });
+        assert.ok(Number.isFinite(first.vx) && Number.isFinite(second.vx));
+        assert.ok(Math.hypot(first.vx - second.vx, first.vy - second.vy) > 0);
+    });
+
+    it("pushes near-colliding nodes apart even when Coulomb repulsion is weak", () => {
+        const first = { id: "a", type: "ATM", x: 0, y: 0, vx: 0, vy: 0, radius: 4.5 };
+        const second = { id: "b", type: "ATM", x: 4, y: 0, vx: 0, vy: 0, radius: 4.5 };
+        applyClusterRepulsion([first, second], { kRepel: 100, minGap: 6 });
+        assert.ok(first.vx < -0.4 && second.vx > 0.4);
+    });
+
+    it("normalizes leaf spring feedback to its parent without weakening the leaf attraction", () => {
+        const parent = { type: "kantor", x: 120, y: 0, vx: 0, vy: 0 };
+        const leaf = { type: "ATM", x: 220, y: 0, vx: 0, vy: 0 };
+        applySpringForce({ source: parent, target: leaf, targetDist: 80, memberCount: 20 }, { kSpring: 0.05 });
+        assert.ok(Math.abs(parent.vx - 0.05) < 1e-10);
+        assert.ok(Math.abs(leaf.vx + 1) < 1e-10);
+    });
+
+    it("keeps the full core-to-parent spring", () => {
+        const core = { type: "core", x: 0, y: 0, vx: 0, vy: 0 };
+        const parent = { type: "kantor", x: 200, y: 0, vx: 0, vy: 0 };
+        applySpringForce({ source: core, target: parent, targetDist: 120 }, { kSpring: 0.05 });
+        assert.ok(Math.abs(parent.vx + 4) < 1e-10);
+    });
+
+    it("reduces repulsion for large clusters but preserves small clusters", () => {
+        assert.strictEqual(getClusterRepulsion(2, 2400), 2400);
+        assert.ok(getClusterRepulsion(30, 2400) < 2400);
+        assert.ok(getClusterRepulsion(30, 2400) > 0);
+    });
+
+    it("strengthens parent spring for large clusters but preserves small clusters", () => {
+        assert.strictEqual(getClusterSpringStrength(2, 0.045), 0.045);
+        assert.ok(getClusterSpringStrength(30, 0.045) > 0.045);
+        assert.ok(getClusterSpringStrength(30, 0.045) < 0.1);
+    });
+
+    it("pulls leaves gently toward the core without moving hubs", () => {
+        const leaf = { type: "ATM", x: 200, y: -100, vx: 0, vy: 0 };
+        const hub = { type: "kantor", x: 200, y: -100, vx: 0, vy: 0 };
+        applyLeafClusterGravity([leaf, hub], 0.0005);
+        assert.ok(leaf.vx < 0 && leaf.vx > -0.2);
+        assert.ok(leaf.vy > 0 && leaf.vy < 0.1);
+        assert.strictEqual(hub.vx, 0);
+    });
+});
 
 describe("NOC graph leaf radial layout", () => {
     it("pushes a leaf outward when it sits between the core and its parent", () => {

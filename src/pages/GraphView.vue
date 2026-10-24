@@ -290,15 +290,13 @@ import { UP, DOWN } from "../util.ts";
 import {
     buildNodesByGroup,
     getRepelWeight,
-    applyHubRepulsion,
     applyClusterRepulsion,
-    applyOfflineOutwardForce,
-    applyLeafOutwardForce,
-    applySpringForce,
-    applyCenterGravity,
     collectStatusChangedNodes,
     shouldTriggerMicroReheat,
     applyMicroReheatImpulse,
+    getClusterRepulsion,
+    computeRadialLayout,
+    dragGroupWithChildren,
 } from "../noc-graph-cluster";
 
 export default {
@@ -322,6 +320,7 @@ export default {
             enableParticles: true,
             alwaysShowLabels: false,
             isPhysicsActive: true,
+            isPhysicsSleeping: false,
             physicsNodeLimit: 180,
             physicsStableFrames: 0,
             linkDistance: 80,
@@ -415,6 +414,9 @@ export default {
 
         physicsModeLabel() {
             if (!this.isPhysicsActive) {
+                return "OFF";
+            }
+            if (this.isPhysicsSleeping) {
                 return "STABIL";
             }
             return this.nodes.length > this.physicsNodeLimit ? "CLUSTER CERDAS" : "FULL";
@@ -485,9 +487,6 @@ export default {
         selectedGroup() {
             this.syncGraphData();
         },
-        statusFilter() {
-            this.syncGraphData();
-        },
         showAtm() {
             this.syncGraphData();
         },
@@ -505,6 +504,17 @@ export default {
         },
         linkDistance() {
             this.updateLinkDistances();
+        },
+        isPhysicsActive(active) {
+            if (active) {
+                this.physicsStableFrames = 0;
+                this.isPhysicsSleeping = false;
+            }
+        },
+        statusFilter() {
+            this.isPhysicsSleeping = false;
+            this.physicsStableFrames = 0;
+            this.syncGraphData();
         },
     },
     mounted() {
@@ -798,15 +808,20 @@ export default {
 
             // 2. Create Group / Kantor Cluster Nodes (semua grup aktif muncul bersama anak-anaknya)
             const groupList = Array.from(activeGroups);
-            const groupAngleStep = (Math.PI * 2) / (groupList.length || 1);
+            const memberCounts = Object.fromEntries(groupList.map(group => [
+                group,
+                filteredMonitors.filter(m => m.group === group).length,
+            ]));
+            const radialLayout = computeRadialLayout(groupList, memberCounts, {
+                groupOrbit: 240,
+                leafOrbit: 76,
+            });
 
-            groupList.forEach((grp, idx) => {
+            groupList.forEach((grp) => {
                 const grpId = "GRP_" + grp;
-                const existing = existingNodeMap.get(grpId);
-                const angle = idx * groupAngleStep;
-                const dist = 180;
-                const defaultX = Math.cos(angle) * dist;
-                const defaultY = Math.sin(angle) * dist;
+                const radialPosition = radialLayout.get(grp);
+                const defaultX = radialPosition?.x ?? 0;
+                const defaultY = radialPosition?.y ?? 0;
 
                 const grpNode = {
                     id: grpId,
@@ -815,10 +830,12 @@ export default {
                     type: "kantor",
                     radius: 9,
                     status: "up",
-                    x: existing ? existing.x : defaultX,
-                    y: existing ? existing.y : defaultY,
-                    vx: existing ? existing.vx : 0,
-                    vy: existing ? existing.vy : 0,
+                    x: defaultX,
+                    y: defaultY,
+                    anchorX: defaultX,
+                    anchorY: defaultY,
+                    vx: 0,
+                    vy: 0,
                     connectedCount: 0,
                 };
                 newNodes.push(grpNode);
@@ -904,9 +921,12 @@ export default {
             // 4. Create Leaf Nodes for ATM / Backup / Devices
             let hasAnyDown = false;
             const groupMemberCount = new Map();
+            const totalMembersByGroup = new Map();
+            filteredMonitors.forEach(m => {
+                totalMembersByGroup.set(m.group, (totalMembersByGroup.get(m.group) || 0) + 1);
+            });
             filteredMonitors.forEach((m, idx) => {
                 const nodeId = "MON_" + m.id;
-                const existing = existingNodeMap.get(nodeId);
                 const parentGroup = groupNodeMap.get(m.group);
 
                 const beat = this.getBeat(m.id);
@@ -934,6 +954,11 @@ export default {
                 const clusterAngleIndex = groupMemberCount.get(m.group) || 0;
                 groupMemberCount.set(m.group, clusterAngleIndex + 1);
 
+                const radialGroup = radialLayout.get(m.group);
+                const radialChild = radialGroup?.children?.[clusterAngleIndex];
+                const resolvedDefaultX = radialChild?.x ?? defaultX;
+                const resolvedDefaultY = radialChild?.y ?? defaultY;
+
                 const node = {
                     id: nodeId,
                     monitorId: m.id,
@@ -945,10 +970,12 @@ export default {
                     status: status,
                     ping: ping,
                     radius: radius,
-                    x: existing ? existing.x : defaultX,
-                    y: existing ? existing.y : defaultY,
-                    vx: existing ? existing.vx : 0,
-                    vy: existing ? existing.vy : 0,
+                    x: resolvedDefaultX,
+                    y: resolvedDefaultY,
+                    anchorX: resolvedDefaultX,
+                    anchorY: resolvedDefaultY,
+                    vx: 0,
+                    vy: 0,
                     connectedCount: 1,
                     clusterKey: m.group,
                     parentId: parentGroup ? parentGroup.id : null,
@@ -966,6 +993,7 @@ export default {
                         target: node,
                         targetDist: this.linkDistance,
                         isBackup: m.type === "BACKUP",
+                        memberCount: totalMembersByGroup.get(m.group) || 1,
                     });
                     parentGroup.connectedCount++;
                 }
@@ -1107,80 +1135,44 @@ export default {
         // PHYSICS ENGINE LOOP (FORCE-DIRECTED 60 FPS)
         // ==========================================
         updatePhysics() {
-            if (!this.isPhysicsActive) {
+            if (!this.isPhysicsActive || this.isPhysicsSleeping) {
                 return;
             }
 
             const nodes = this.nodes;
-            const links = this.links;
             const nodeCount = nodes.length;
             const isLargeTopology = nodeCount > this.physicsNodeLimit;
 
             const kRepel = isLargeTopology ? 1600 : 2400;
-            const kSpring = isLargeTopology ? 0.045 : 0.035;
-            const kGravity = 0.003;
             const damping = isLargeTopology ? 0.80 : 0.86;
             const maxRepelDistSq = isLargeTopology ? 25000 : 90000;
 
-            // 1. Two-Tier Repulsion & Offline Outward Boost
-            // 1a. Hub Repulsion: Core & Kantor nodes repel each other
-            const hubNodes = [];
-            const hubMap = new Map();
-            for (let i = 0; i < nodeCount; i++) {
-                const n = nodes[i];
-                if (n.type === "core" || n.type === "kantor") {
-                    hubNodes.push(n);
-                    hubMap.set(n.id, n);
-                }
-            }
-            applyHubRepulsion(hubNodes, {
-                kRepel: isLargeTopology ? 2200 : 3200,
-                maxRepelDistSq,
-            });
-
-            // 1b. Intra-Cluster Sibling Repulsion: within each cluster
+            // 1. Collision repulsion: only separate overlapping nodes
             const clusterMap = this.nodesByGroup || this.groupMembers;
             if (clusterMap && clusterMap.size > 0) {
                 for (const members of clusterMap.values()) {
                     applyClusterRepulsion(members, {
-                        kRepel,
+                        kRepel: getClusterRepulsion(members.length, kRepel),
                         maxRepelDistSq,
+                        minGap: 6,
                     });
                 }
             }
 
-            // 1c. Offline Outward Boost: radial push for 'down' nodes away from parent
+            // 2. Anchor spring: pull every node toward its radial layout position
+            const kAnchor = 0.08;
             for (let i = 0; i < nodeCount; i++) {
                 const n = nodes[i];
-                if (n.status === "down" && n.parentId) {
-                    const parent = hubMap.get(n.parentId);
-                    if (parent) {
-                        applyOfflineOutwardForce(n, parent, {
-                            linkDistance: this.linkDistance,
-                            boostRatio: 0.20,
-                            kSpring,
-                        });
-                    }
+                if (n.type === "core" || n.type === "tag") {
+                    continue;
                 }
-
-                // 1d. Leaf Outward: keep leaf outside its parent
-                if (n.type !== "core" && n.type !== "tag" && n.type !== "kantor" && n.parentId) {
-                    const parent = hubMap.get(n.parentId);
-                    if (parent) {
-                        applyLeafOutwardForce(n, parent, {
-                            linkDistance: this.linkDistance,
-                            strength: 0.04,
-                        });
-                    }
+                if (this.draggedNode === n) {
+                    continue;
                 }
-            }
-
-            // 1e. Center Gravity: hubs only, so leaf clusters stay outside.
-            applyCenterGravity(hubNodes, kGravity);
-
-            // 2. Hooke Spring Attraction along links
-            for (let i = 0; i < links.length; i++) {
-                applySpringForce(links[i], { kSpring });
+                if (n.anchorX !== undefined && n.anchorY !== undefined) {
+                    n.vx += (n.anchorX - n.x) * kAnchor;
+                    n.vy += (n.anchorY - n.y) * kAnchor;
+                }
             }
 
             // 3. Apply velocity & friction and measure movement
@@ -1230,11 +1222,11 @@ export default {
                 }
             }
 
-            // Nonaktifkan simulasi fisika setelah posisi stabil (Energy stabilization cooling)
+            // Masuk mode sleep hemat CPU saat gerakan sudah sangat stabil
             if (maxMovement < 0.12 && !this.draggedNode) {
                 this.physicsStableFrames++;
                 if (this.physicsStableFrames > 25) {
-                    this.isPhysicsActive = false;
+                    this.isPhysicsSleeping = true;
                 }
             } else {
                 this.physicsStableFrames = 0;
@@ -1572,10 +1564,15 @@ export default {
             const { worldX, worldY, clientX, clientY } = this.getCanvasMouseWorld(e);
 
             if (this.isDragging && this.draggedNode) {
-                this.draggedNode.x = worldX;
-                this.draggedNode.y = worldY;
+                if (this.draggedNode.type === "kantor") {
+                    dragGroupWithChildren(this.draggedNode, worldX, worldY, this.nodes);
+                } else {
+                    this.draggedNode.x = worldX;
+                    this.draggedNode.y = worldY;
+                }
                 this.draggedNode.vx = 0;
                 this.draggedNode.vy = 0;
+                this.physicsStableFrames = 0;
                 this.setTooltipPos(clientX, clientY);
                 return;
             }
@@ -1596,17 +1593,38 @@ export default {
             }
         },
 
+        returnDraggedGroupToAnchor() {
+            const group = this.draggedNode;
+            if (!group || group.type !== "kantor") {
+                return;
+            }
+            const dx = group.anchorX - group.x;
+            const dy = group.anchorY - group.y;
+            group.x = group.anchorX;
+            group.y = group.anchorY;
+            this.nodes.forEach(node => {
+                if (node !== group && node.group === group.group && node.type !== "tag") {
+                    node.x += dx;
+                    node.y += dy;
+                }
+            });
+        },
+
         onMouseUp() {
+            this.returnDraggedGroupToAnchor();
             this.isDragging = false;
             this.draggedNode = null;
             this.isPanning = false;
+            this.physicsStableFrames = 0;
         },
 
         onMouseLeave() {
+            this.returnDraggedGroupToAnchor();
             this.isDragging = false;
             this.draggedNode = null;
             this.isPanning = false;
             this.hoveredNode = null;
+            this.physicsStableFrames = 0;
         },
 
         onWheel(e) {
