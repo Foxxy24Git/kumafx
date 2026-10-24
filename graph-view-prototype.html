@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Obsidian Graph View - Standalone Native Prototype</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background-color: #121215;
+      color: #94a1b2;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    #canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      cursor: grab;
+    }
+
+    #canvas:active {
+      cursor: grabbing;
+    }
+
+    /* Floating UI Controls ala Obsidian */
+    .control-panel {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 310px;
+      background: rgba(22, 22, 27, 0.88);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 12px;
+      padding: 16px 18px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+      z-index: 10;
+      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .control-panel.collapsed {
+      transform: translateX(330px);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .panel-header h2 {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: #fffffe;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .panel-header h2::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #7f5af0;
+      box-shadow: 0 0 8px #7f5af0;
+    }
+
+    .toggle-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #94a1b2;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+
+    .toggle-btn:hover {
+      background: #7f5af0;
+      color: #fff;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 7px;
+      padding: 8px 12px;
+      color: #fffffe;
+      font-size: 13px;
+      outline: none;
+      margin-bottom: 14px;
+      transition: border-color 0.2s;
+    }
+
+    .search-input:focus {
+      border-color: #7f5af0;
+      box-shadow: 0 0 0 2px rgba(127, 90, 240, 0.25);
+    }
+
+    .control-group {
+      margin-bottom: 12px;
+    }
+
+    .control-group label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 6px;
+      color: #94a1b2;
+    }
+
+    .control-group label span.val {
+      color: #a78bfa;
+      font-weight: 600;
+      font-family: monospace;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 4px;
+      appearance: none;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #7f5af0;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(127, 90, 240, 0.7);
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 7px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      color: #fffffe;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn:hover {
+      background: rgba(127, 90, 240, 0.3);
+      border-color: #7f5af0;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 3px 8px;
+      border-radius: 12px;
+      color: #cbd5e1;
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    /* Floating Toggle Button saat Panel Collapsed */
+    .reopen-panel-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(22, 22, 27, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #fffffe;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      z-index: 9;
+      display: none;
+    }
+
+    /* Info Badge Kiri Bawah */
+    .hud-badge {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(22, 22, 27, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 12px;
+      color: #94a1b2;
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      gap: 12px;
+    }
+
+    .hud-badge strong {
+      color: #fffffe;
+    }
+
+    .instructions {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.35);
+      pointer-events: none;
+      z-index: 10;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="canvas"></canvas>
+
+  <div class="hud-badge">
+    <span>Nodes: <strong id="hud-nodes">0</strong></span>
+    <span>Links: <strong id="hud-links">0</strong></span>
+    <span>FPS: <strong id="hud-fps">60</strong></span>
+  </div>
+
+  <div class="instructions">
+    Scroll: Zoom &nbsp;|&nbsp; Drag Background: Pan &nbsp;|&nbsp; Drag Node: Move &nbsp;|&nbsp; Click: Focus
+  </div>
+
+  <button class="reopen-panel-btn" id="reopen-btn">⚙ Filters & Physics</button>
+
+  <div class="control-panel" id="panel">
+    <div class="panel-header">
+      <h2>Graph Settings</h2>
+      <button class="toggle-btn" id="collapse-btn">Tutup</button>
+    </div>
+
+    <input type="text" id="search-box" class="search-input" placeholder="Cari catatan (cth: Architecture, Parser)...">
+
+    <div class="control-group">
+      <label>Repulsion (Gaya Tolak) <span class="val" id="repulsion-val">420</span></label>
+      <input type="range" id="repulsion" min="100" max="1000" value="420">
+    </div>
+
+    <div class="control-group">
+      <label>Link Distance (Panjang Tautan) <span class="val" id="distance-val">85</span></label>
+      <input type="range" id="distance" min="30" max="250" value="85">
+    </div>
+
+    <div class="control-group">
+      <label>Centering Force (Pusat Gravitasi) <span class="val" id="center-val">0.03</span></label>
+      <input type="range" id="center-force" min="0.005" max="0.1" step="0.005" value="0.03">
+    </div>
+
+    <div class="control-group">
+      <label>Node Size Multiplier <span class="val" id="size-val">1.0</span></label>
+      <input type="range" id="node-size" min="0.5" max="2.5" step="0.1" value="1.0">
+    </div>
+
+    <div class="btn-row">
+      <button class="btn" id="reset-cam-btn">Reset Kamera</button>
+      <button class="btn" id="shuffle-btn">Acak Posisi</button>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>#core</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#34d399"></div>#frontend</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#fb923c"></div>#backend</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f472b6"></div>#database</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#94a3b8"></div>#notes</div>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // DATASET GRAPH ALA OBSIDIAN
+    // ==========================================
+    const rawNodes = [
+      { id: "App Architecture", group: "core", val: 14 },
+      { id: "Electron Main Process", group: "core", val: 10 },
+      { id: "Electron Renderer", group: "frontend", val: 10 },
+      { id: "Graph View Engine", group: "frontend", val: 12 },
+      { id: "Canvas 2D Renderer", group: "frontend", val: 8 },
+      { id: "Force Simulation (Physics)", group: "frontend", val: 8 },
+      { id: "State Management", group: "frontend", val: 7 },
+      { id: "Zettelkasten Method", group: "notes", val: 9 },
+      { id: "Bi-directional Links", group: "core", val: 11 },
+      { id: "Markdown Parser", group: "backend", val: 9 },
+      { id: "AST Tokenizer", group: "backend", val: 6 },
+      { id: "Local File System", group: "backend", val: 8 },
+      { id: "SQLite Database", group: "database", val: 8 },
+      { id: "Full-text Search Index", group: "database", val: 7 },
+      { id: "Tag Taxonomy System", group: "notes", val: 6 },
+      { id: "Daily Notes & Journal", group: "notes", val: 6 },
+      { id: "Knowledge Graph Concept", group: "core", val: 13 },
+      { id: "Node Hover & Focus", group: "frontend", val: 5 },
+      { id: "Link Glow Effect", group: "frontend", val: 5 },
+      { id: "Smooth Pan & Zoom", group: "frontend", val: 5 },
+      { id: "Hotkeys & Shortcuts", group: "core", val: 6 },
+      { id: "Plugin API & Hooks", group: "backend", val: 8 },
+      { id: "Canvas Drag Physics", group: "frontend", val: 5 }
+    ];
+
+    const rawLinks = [
+      { source: "App Architecture", target: "Electron Main Process" },
+      { source: "App Architecture", target: "Electron Renderer" },
+      { source: "App Architecture", target: "Knowledge Graph Concept" },
+      { source: "Electron Renderer", target: "Graph View Engine" },
+      { source: "Electron Renderer", target: "State Management" },
+      { source: "Graph View Engine", target: "Canvas 2D Renderer" },
+      { source: "Graph View Engine", target: "Force Simulation (Physics)" },
+      { source: "Graph View Engine", target: "Node Hover & Focus" },
+      { source: "Graph View Engine", target: "Link Glow Effect" },
+      { source: "Graph View Engine", target: "Smooth Pan & Zoom" },
+      { source: "Graph View Engine", target: "Canvas Drag Physics" },
+      { source: "Knowledge Graph Concept", target: "Bi-directional Links" },
+      { source: "Knowledge Graph Concept", target: "Zettelkasten Method" },
+      { source: "Bi-directional Links", target: "Markdown Parser" },
+      { source: "Markdown Parser", target: "AST Tokenizer" },
+      { source: "Markdown Parser", target: "Local File System" },
+      { source: "Local File System", target: "Electron Main Process" },
+      { source: "Local File System", target: "SQLite Database" },
+      { source: "SQLite Database", target: "Full-text Search Index" },
+      { source: "Zettelkasten Method", target: "Daily Notes & Journal" },
+      { source: "Zettelkasten Method", target: "Tag Taxonomy System" },
+      { source: "Full-text Search Index", target: "Bi-directional Links" },
+      { source: "App Architecture", target: "Plugin API & Hooks" },
+      { source: "Plugin API & Hooks", target: "Markdown Parser" },
+      { source: "App Architecture", target: "Hotkeys & Shortcuts" }
+    ];
+
+    const colorPalette = {
+      core: "#a78bfa",      // Ungu khas Obsidian
+      frontend: "#34d399",  // Emerald
+      backend: "#fb923c",   // Oranye
+      database: "#f472b6",  // Pink
+      notes: "#94a3b8"      // Abu-abu terang
+    };
+
+    // ==========================================
+    // INITIAL SETUP & STATE
+    // ==========================================
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight);
+
+    document.getElementById("hud-nodes").innerText = rawNodes.length;
+    document.getElementById("hud-links").innerText = rawLinks.length;
+
+    // Build Node Dictionary
+    const nodes = rawNodes.map((n, i) => {
+      const angle = (i / rawNodes.length) * 2 * Math.PI;
+      const r = 180 + (Math.random() * 80 - 40);
+      return {
+        ...n,
+        x: Math.cos(angle) * r,
+        y: Math.sin(angle) * r,
+        vx: 0,
+        vy: 0,
+        radius: (n.val || 6) * 1.0,
+        color: colorPalette[n.group] || "#94a3b8",
+        neighbors: new Set(),
+        links: []
+      };
+    });
+
+    const nodeMap = new Map();
+    nodes.forEach(n => nodeMap.set(n.id, n));
+
+    const links = rawLinks.map(l => {
+      const source = nodeMap.get(l.source);
+      const target = nodeMap.get(l.target);
+      source.neighbors.add(target.id);
+      target.neighbors.add(source.id);
+      const linkObj = { source, target };
+      source.links.push(linkObj);
+      target.links.push(linkObj);
+      return linkObj;
+    });
+
+    // Particle flow effect
+    const particles = links.map(() => ({
+      progress: Math.random(),
+      speed: 0.003 + Math.random() * 0.005
+    }));
+
+    // ==========================================
+    // CAMERA & INTERACTION STATE
+    // ==========================================
+    const camera = {
+      x: width / 2,
+      y: height / 2,
+      zoom: 1.0,
+      targetX: width / 2,
+      targetY: height / 2,
+      targetZoom: 1.0
+    };
+
+    let hoveredNode = null;
+    let draggedNode = null;
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+    let searchQuery = "";
+
+    // Physics parameters
+    let repulsion = 420;
+    let linkDistance = 85;
+    let centerStrength = 0.03;
+    let nodeSizeMultiplier = 1.0;
+    const damping = 0.88;
+
+    // Convert Screen coordinates to World coordinates
+    function toWorld(screenX, screenY) {
+      return {
+        x: (screenX - camera.x) / camera.zoom,
+        y: (screenY - camera.y) / camera.zoom
+      };
+    }
+
+    // Convert World coordinates to Screen coordinates
+    function toScreen(worldX, worldY) {
+      return {
+        x: worldX * camera.zoom + camera.x,
+        y: worldY * camera.zoom + camera.y
+      };
+    }
+
+    // ==========================================
+    // NATIVE PHYSICS ENGINE (FORCE-DIRECTED)
+    // ==========================================
+    function updatePhysics() {
+      const nLen = nodes.length;
+
+      // 1. Repulsion Force (Coulomb's Law O(N^2))
+      for (let i = 0; i < nLen; i++) {
+        const n1 = nodes[i];
+        for (let j = i + 1; j < nLen; j++) {
+          const n2 = nodes[j];
+          let dx = n2.x - n1.x;
+          let dy = n2.y - n1.y;
+          let distSq = dx * dx + dy * dy;
+          if (distSq === 0) {
+            dx = (Math.random() - 0.5) * 2;
+            dy = (Math.random() - 0.5) * 2;
+            distSq = dx * dx + dy * dy;
+          }
+
+          const dist = Math.sqrt(distSq);
+          // Collision buffer
+          const minSafeDist = (n1.radius + n2.radius) * nodeSizeMultiplier + 8;
+          let force = (repulsion * 20) / (distSq + 120);
+
+          if (dist < minSafeDist) {
+            force += (minSafeDist - dist) * 0.12;
+          }
+
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          n1.vx -= fx;
+          n1.vy -= fy;
+          n2.vx += fx;
+          n2.vy += fy;
+        }
+      }
+
+      // 2. Spring Attraction Force (Hooke's Law)
+      for (let i = 0; i < links.length; i++) {
+        const { source, target } = links[i];
+        let dx = target.x - source.x;
+        let dy = target.y - source.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist === 0) dist = 1;
+
+        const displacement = dist - linkDistance;
+        const force = displacement * 0.042;
+
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+
+        source.vx += fx;
+        source.vy += fy;
+        target.vx -= fx;
+        target.vy -= fy;
+      }
+
+      // 3. Center Gravity & Integration
+      for (let i = 0; i < nLen; i++) {
+        const n = nodes[i];
+        if (n === draggedNode) continue; // Jangan gerakkan node yang sedang di-drag
+
+        // Lembut menarik node ke pusat (0,0)
+        n.vx -= n.x * centerStrength;
+        n.vy -= n.y * centerStrength;
+
+        // Damping / Friksi
+        n.vx *= damping;
+        n.vy *= damping;
+
+        // Update Posisi
+        n.x += n.vx;
+        n.y += n.vy;
+      }
+
+      // Smooth camera transition (lerp)
+      camera.x += (camera.targetX - camera.x) * 0.12;
+      camera.y += (camera.targetY - camera.y) * 0.12;
+      camera.zoom += (camera.targetZoom - camera.zoom) * 0.12;
+    }
+
+    // ==========================================
+    // RENDER LOOP (CANVAS 2D 60 FPS)
+    // ==========================================
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let fpsTime = performance.now();
+
+    function render() {
+      // Hitung FPS
+      frameCount++;
+      const now = performance.now();
+      if (now - fpsTime >= 1000) {
+        document.getElementById("hud-fps").innerText = frameCount;
+        frameCount = 0;
+        fpsTime = now;
+      }
+
+      updatePhysics();
+
+      // Clear Canvas
+      ctx.fillStyle = "#121215";
+      ctx.fillRect(0, 0, width, height);
+
+      // Save context untuk camera matrix
+      ctx.save();
+      ctx.translate(camera.x, camera.y);
+      ctx.scale(camera.zoom, camera.zoom);
+
+      // Pre-compute hover / highlight set
+      const isFilterActive = hoveredNode !== null || searchQuery !== "";
+      const activeNodeIds = new Set();
+      const activeLinks = new Set();
+
+      if (hoveredNode) {
+        activeNodeIds.add(hoveredNode.id);
+        hoveredNode.neighbors.forEach(id => activeNodeIds.add(id));
+        hoveredNode.links.forEach(l => activeLinks.add(l));
+      }
+
+      if (searchQuery) {
+        nodes.forEach(n => {
+          if (n.id.toLowerCase().includes(searchQuery)) {
+            activeNodeIds.add(n.id);
+            n.links.forEach(l => activeLinks.add(l));
+          }
+        });
+      }
+
+      // ----------------------------------------
+      // A. DRAW LINKS (GARIS PENGHUBUNG)
+      // ----------------------------------------
+      for (let i = 0; i < links.length; i++) {
+        const link = links[i];
+        const isHighlight = activeLinks.has(link);
+
+        ctx.beginPath();
+        ctx.moveTo(link.source.x, link.source.y);
+        ctx.lineTo(link.target.x, link.target.y);
+
+        if (isFilterActive) {
+          if (isHighlight) {
+            ctx.strokeStyle = "rgba(167, 139, 250, 0.9)";
+            ctx.lineWidth = 2.2 / camera.zoom;
+          } else {
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.02)";
+            ctx.lineWidth = 0.8 / camera.zoom;
+          }
+        } else {
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+          ctx.lineWidth = 1.1 / camera.zoom;
+        }
+        ctx.stroke();
+
+        // Partikel Mengalir di Tautan yang Sedang Aktif
+        if (isHighlight) {
+          const p = particles[i];
+          p.progress = (p.progress + p.speed) % 1;
+          const px = link.source.x + (link.target.x - link.source.x) * p.progress;
+          const py = link.source.y + (link.target.y - link.source.y) * p.progress;
+
+          ctx.beginPath();
+          ctx.arc(px, py, 2.5 / camera.zoom, 0, Math.PI * 2);
+          ctx.fillStyle = "#ffffff";
+          ctx.fill();
+        }
+      }
+
+      // ----------------------------------------
+      // B. DRAW NODES (LINGKARAN & LABEL)
+      // ----------------------------------------
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const isHovered = n === hoveredNode;
+        const isMatch = activeNodeIds.has(n.id);
+        const radius = n.radius * nodeSizeMultiplier * (isHovered ? 1.3 : 1.0);
+
+        let alpha = 1.0;
+        if (isFilterActive && !isMatch) {
+          alpha = 0.12; // Meredupkan node yang tidak terhubung
+        }
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        // Outer Glow Halo
+        if (isHovered || (searchQuery && isMatch)) {
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, radius + (6 / camera.zoom), 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(167, 139, 250, 0.35)";
+          ctx.fill();
+        }
+
+        // Lingkaran Node
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = n.color;
+        ctx.fill();
+
+        // Outline Node
+        ctx.lineWidth = 1.4 / camera.zoom;
+        ctx.strokeStyle = isHovered ? "#ffffff" : "rgba(255, 255, 255, 0.35)";
+        ctx.stroke();
+
+        // Label Catatan
+        const showLabel = camera.zoom > 0.85 || isHovered || isMatch;
+        if (showLabel) {
+          const fontSize = Math.max(11 / camera.zoom, 3.5);
+          ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillStyle = isHovered ? "#ffffff" : "rgba(255, 255, 255, 0.85)";
+          ctx.fillText(n.id, n.x, n.y + radius + (3 / camera.zoom));
+        }
+
+        ctx.restore();
+      }
+
+      ctx.restore();
+      requestAnimationFrame(render);
+    }
+
+    // ==========================================
+    // INTERAKSI MOUSE (PAN, ZOOM, DRAG, HOVER)
+    // ==========================================
+    function findNodeAt(worldX, worldY) {
+      for (let i = nodes.length - 1; i >= 0; i--) {
+        const n = nodes[i];
+        const dx = worldX - n.x;
+        const dy = worldY - n.y;
+        const r = (n.radius * nodeSizeMultiplier) + 4;
+        if (dx * dx + dy * dy <= r * r) {
+          return n;
+        }
+      }
+      return null;
+    }
+
+    canvas.addEventListener("mousemove", e => {
+      const world = toWorld(e.clientX, e.clientY);
+
+      if (draggedNode) {
+        draggedNode.x = world.x;
+        draggedNode.y = world.y;
+        draggedNode.vx = 0;
+        draggedNode.vy = 0;
+        return;
+      }
+
+      if (isPanning) {
+        camera.targetX += e.clientX - panStart.x;
+        camera.targetY += e.clientY - panStart.y;
+        panStart = { x: e.clientX, y: e.clientY };
+        return;
+      }
+
+      const found = findNodeAt(world.x, world.y);
+      if (found !== hoveredNode) {
+        hoveredNode = found;
+        canvas.style.cursor = found ? "pointer" : "grab";
+      }
+    });
+
+    canvas.addEventListener("mousedown", e => {
+      if (e.button !== 0) return; // Hanya klik kiri
+      const world = toWorld(e.clientX, e.clientY);
+      const found = findNodeAt(world.x, world.y);
+
+      if (found) {
+        draggedNode = found;
+      } else {
+        isPanning = true;
+        panStart = { x: e.clientX, y: e.clientY };
+      }
+    });
+
+    window.addEventListener("mouseup", () => {
+      draggedNode = null;
+      isPanning = false;
+    });
+
+    // Zoom via Scroll Wheel
+    canvas.addEventListener("wheel", e => {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+      const newZoom = Math.max(0.2, Math.min(camera.targetZoom * zoomFactor, 4.0));
+
+      // Zoom memusat ke titik kursor mouse
+      const mouseX = e.clientX;
+      const mouseY = e.clientY;
+
+      camera.targetX = mouseX - (mouseX - camera.targetX) * (newZoom / camera.targetZoom);
+      camera.targetY = mouseY - (mouseY - camera.targetY) * (newZoom / camera.targetZoom);
+      camera.targetZoom = newZoom;
+    }, { passive: false });
+
+    // Klik untuk Auto-Focus ke Node
+    canvas.addEventListener("click", e => {
+      const world = toWorld(e.clientX, e.clientY);
+      const clicked = findNodeAt(world.x, world.y);
+      if (clicked) {
+        camera.targetX = width / 2 - clicked.x * 2.2;
+        camera.targetY = height / 2 - clicked.y * 2.2;
+        camera.targetZoom = 2.2;
+      }
+    });
+
+    // ==========================================
+    // UI CONTROLS EVENT LISTENERS
+    // ==========================================
+    const repulsionEl = document.getElementById("repulsion");
+    const distanceEl = document.getElementById("distance");
+    const centerEl = document.getElementById("center-force");
+    const sizeEl = document.getElementById("node-size");
+    const searchEl = document.getElementById("search-box");
+
+    repulsionEl.addEventListener("input", e => {
+      repulsion = Number(e.target.value);
+      document.getElementById("repulsion-val").innerText = repulsion;
+    });
+
+    distanceEl.addEventListener("input", e => {
+      linkDistance = Number(e.target.value);
+      document.getElementById("distance-val").innerText = linkDistance;
+    });
+
+    centerEl.addEventListener("input", e => {
+      centerStrength = Number(e.target.value);
+      document.getElementById("center-val").innerText = centerStrength.toFixed(3);
+    });
+
+    sizeEl.addEventListener("input", e => {
+      nodeSizeMultiplier = Number(e.target.value);
+      document.getElementById("size-val").innerText = nodeSizeMultiplier.toFixed(1);
+    });
+
+    searchEl.addEventListener("input", e => {
+      searchQuery = e.target.value.trim().toLowerCase();
+    });
+
+    document.getElementById("reset-cam-btn").addEventListener("click", () => {
+      camera.targetX = width / 2;
+      camera.targetY = height / 2;
+      camera.targetZoom = 1.0;
+    });
+
+    document.getElementById("shuffle-btn").addEventListener("click", () => {
+      nodes.forEach(n => {
+        n.x = (Math.random() - 0.5) * 400;
+        n.y = (Math.random() - 0.5) * 400;
+        n.vx = (Math.random() - 0.5) * 20;
+        n.vy = (Math.random() - 0.5) * 20;
+      });
+    });
+
+    // Panel Minimize / Reopen
+    const panel = document.getElementById("panel");
+    const reopenBtn = document.getElementById("reopen-btn");
+    document.getElementById("collapse-btn").addEventListener("click", () => {
+      panel.classList.add("collapsed");
+      reopenBtn.style.display = "block";
+    });
+    reopenBtn.addEventListener("click", () => {
+      panel.classList.remove("collapsed");
+      reopenBtn.style.display = "none";
+    });
+
+    // Handle Window Resize
+    window.addEventListener("resize", () => {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+      camera.targetX = width / 2;
+      camera.targetY = height / 2;
+    });
+
+    // Mulai Animasi!
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>
