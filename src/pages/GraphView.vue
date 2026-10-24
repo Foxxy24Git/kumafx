@@ -291,6 +291,7 @@ import {
     applyMicroReheatImpulse,
     reheatSimulationNodes,
     collectHostTags,
+    buildLinkParticles,
 } from "../noc-graph-cluster";
 
 const TAG_POSITION_STORAGE_KEY = "uptime-kuma-graph-tag-positions";
@@ -838,17 +839,7 @@ export default {
         },
 
         initParticles() {
-            const particles = [];
-            this.links.forEach(link => {
-                if (link.target.status !== "down") {
-                    particles.push({
-                        link: link,
-                        t: Math.random(),
-                        speed: 0.003 + (Math.random() * 0.004),
-                    });
-                }
-            });
-            this.particles = markRaw(particles);
+            this.particles = markRaw(buildLinkParticles(this.links));
         },
 
         updateLinkDistances() {
@@ -1094,7 +1085,11 @@ export default {
                 ctx.moveTo(src.x, src.y);
                 ctx.lineTo(tgt.x, tgt.y);
 
-                if (link.isTagLink) {
+                if (link.isTagLink && tgt.status === "down") {
+                    ctx.setLineDash([]);
+                    ctx.strokeStyle = `rgba(239, 68, 68, ${Math.min(alpha * 2.4, 0.9)})`;
+                    ctx.lineWidth = isConnected ? 2.5 : 1.6;
+                } else if (link.isTagLink) {
                     ctx.setLineDash([2, 4]);
                     ctx.strokeStyle = this.rgbaFromHex(src.color, alpha);
                     ctx.lineWidth = isConnected ? 1.6 : 0.7;
@@ -1104,8 +1099,8 @@ export default {
                     ctx.lineWidth = isConnected ? 2 : 1;
                 } else if (tgt.status === "down") {
                     ctx.setLineDash([]);
-                    ctx.strokeStyle = `rgba(239, 68, 68, ${alpha * 1.5})`;
-                    ctx.lineWidth = isConnected ? 2.5 : 1.2;
+                    ctx.strokeStyle = `rgba(239, 68, 68, ${Math.min(alpha * 2.4, 0.9)})`;
+                    ctx.lineWidth = isConnected ? 2.5 : 1.6;
                 } else {
                     ctx.setLineDash([]);
                     ctx.strokeStyle = `rgba(56, 189, 248, ${alpha})`;
@@ -1117,26 +1112,37 @@ export default {
             }
 
             // 3. DRAW PARTICLES (LINK FLOW)
-            if (this.enableParticles) {
-                ctx.fillStyle = "#38bdf8";
-
-                for (let i = 0; i < this.particles.length; i++) {
-                    const p = this.particles[i];
-                    p.t = (p.t + p.speed) % 1;
-
-                    const src = p.link.source;
-                    const tgt = p.link.target;
-                    const px = src.x + (tgt.x - src.x) * p.t;
-                    const py = src.y + (tgt.y - src.y) * p.t;
-
-                    const isDimmed = isHovering && (!connectedSet.has(src.id) || !connectedSet.has(tgt.id));
-                    if (!isDimmed) {
-                        ctx.beginPath();
-                        ctx.arc(px, py, 1.8, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
+            for (let i = 0; i < this.particles.length; i++) {
+                const p = this.particles[i];
+                if (!p.alert && !this.enableParticles) {
+                    continue;
                 }
+                p.t = (p.t + p.speed) % 1;
+
+                const src = p.link.source;
+                const tgt = p.link.target;
+                const progress = p.reverse ? 1 - p.t : p.t;
+                const px = src.x + (tgt.x - src.x) * progress;
+                const py = src.y + (tgt.y - src.y) * progress;
+
+                const isDimmed = isHovering && (!connectedSet.has(src.id) || !connectedSet.has(tgt.id));
+                if (isDimmed) {
+                    continue;
+                }
+                ctx.beginPath();
+                if (p.alert) {
+                    ctx.fillStyle = "rgba(255, 99, 99, 0.55)";
+                    ctx.shadowColor = "rgba(239, 68, 68, 0.45)";
+                    ctx.shadowBlur = 12;
+                    ctx.arc(px, py, 2.4, 0, Math.PI * 2);
+                } else {
+                    ctx.fillStyle = "#38bdf8";
+                    ctx.shadowBlur = 0;
+                    ctx.arc(px, py, 1.8, 0, Math.PI * 2);
+                }
+                ctx.fill();
             }
+            ctx.shadowBlur = 0;
 
             // 4. DRAW NODES
             const timePulse = Math.sin(Date.now() / 250);

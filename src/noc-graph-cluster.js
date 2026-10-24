@@ -461,6 +461,27 @@ export function buildDependencyLinks(monitors, nodes, targetDist = 80) {
 }
 
 /**
+ * Builds particles on healthy links and alert particles on every down-host link.
+ * @param {Array<object>} links Topology links.
+ * @param {Function} random Random number generator.
+ * @returns {Array<object>} Link particles.
+ */
+export function buildLinkParticles(links, random = Math.random) {
+    const particles = [];
+    links.forEach((link) => {
+        const downHost = [ link.source, link.target ].find(node => node.status === "down" && node.type !== "TAG" && node.type !== "GROUP" && node.type !== "CORE");
+        if (downHost) {
+            for (let index = 0; index < 3; index++) {
+                particles.push({ link, t: (index + random()) / 3, speed: 0.006 + random() * 0.004, alert: true, reverse: downHost === link.target });
+            }
+        } else if (link.target.status !== "down") {
+            particles.push({ link, t: random(), speed: 0.003 + random() * 0.004, alert: false });
+        }
+    });
+    return particles;
+}
+
+/**
  * Builds core, dependency, and provider-tag links for the topology graph.
  * @param {Array<object>} monitors Monitor records.
  * @param {Array<object>} nodes Graph nodes.

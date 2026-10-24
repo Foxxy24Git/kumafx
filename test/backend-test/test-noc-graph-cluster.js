@@ -19,7 +19,42 @@ const {
     applyCollisionForce,
     applyLocalForces,
     collectHostTags,
+    buildLinkParticles,
 } = require("../../src/noc-graph-cluster.js");
+
+describe("down host alert particles", () => {
+    const group = { id: "MON_1", type: "GROUP", status: "up" };
+    const telkom = { id: "TAG_Telkom", type: "TAG", status: "up" };
+    const atmTag = { id: "TAG_ATM", type: "TAG", status: "up" };
+    const core = { id: "CORE", type: "CORE", status: "up" };
+    const downHost = { id: "MON_2", type: "KANTOR", status: "down" };
+    const upHost = { id: "MON_3", type: "ATM", status: "up" };
+    const links = [
+        { source: core, target: group, isCoreLink: true },
+        { source: group, target: downHost, isDependency: true },
+        { source: telkom, target: downHost, isTagLink: true },
+        { source: atmTag, target: downHost, isTagLink: true },
+        { source: group, target: upHost, isDependency: true },
+    ];
+
+    it("adds red particles flowing from the down host on every link it touches", () => {
+        const particles = buildLinkParticles(links, () => 0.5);
+        for (const link of links.slice(1, 4)) {
+            const alerts = particles.filter(p => p.link === link);
+            assert.ok(alerts.length >= 2, "down host links need several particles");
+            assert.ok(alerts.every(p => p.alert && p.reverse), "particles must be red and start at the host");
+        }
+    });
+
+    it("keeps normal particles on healthy links", () => {
+        const particles = buildLinkParticles(links, () => 0.5);
+        for (const link of [ links[0], links[4] ]) {
+            const flow = particles.filter(p => p.link === link);
+            assert.strictEqual(flow.length, 1);
+            assert.strictEqual(flow[0].alert, false);
+        }
+    });
+});
 
 describe("tag nodes", () => {
     it("collects every tag attached to host monitors, not only provider tags", () => {
