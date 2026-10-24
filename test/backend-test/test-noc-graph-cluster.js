@@ -2,6 +2,7 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert");
 const {
     applyLeafOutwardForce,
+    applyClusterBlossomForce,
     applyHubRepulsion,
     applyClusterRepulsion,
     applyCenterGravity,
@@ -11,13 +12,116 @@ const {
     getClusterSpringStrength,
     computeRadialLayout,
     dragGroupWithChildren,
+    reheatSimulationNodes,
+    buildDependencyLinks,
+    applyCollisionForce,
+    applyLocalForces,
 } = require("../../src/noc-graph-cluster.js");
+
+describe("grid based local forces", () => {
+    const makeNode = (x, y) => ({ x, y, vx: 0, vy: 0, radius: 8 });
+
+    it("repels nodes that sit in neighbouring grid cells", () => {
+        const first = makeNode(0, 0);
+        const second = makeNode(130, 0);
+        applyLocalForces([first, second], { kRepel: 2200, cutoff: 160, minGap: 6 });
+        assert.ok(first.vx < 0, `first should move left: ${first.vx}`);
+        assert.ok(second.vx > 0, `second should move right: ${second.vx}`);
+        assert.strictEqual(first.vy, 0);
+    });
+
+    it("ignores node pairs beyond the cutoff distance", () => {
+        const first = makeNode(0, 0);
+        const second = makeNode(400, 0);
+        applyLocalForces([first, second], { kRepel: 2200, cutoff: 160, minGap: 6 });
+        assert.strictEqual(first.vx, 0);
+        assert.strictEqual(second.vx, 0);
+    });
+
+    it("separates overlapping nodes", () => {
+        const first = makeNode(0, 0);
+        const second = makeNode(3, 0);
+        applyLocalForces([first, second], { kRepel: 2200, cutoff: 160, minGap: 6 });
+        assert.ok(second.x - first.x > 3, `overlap should shrink: ${second.x - first.x}`);
+    });
+
+    it("applies each pair once even when nodes share a cell", () => {
+        const first = makeNode(0, 0);
+        const second = makeNode(40, 0);
+        applyLocalForces([first, second], { kRepel: 2200, cutoff: 160, minGap: 0 });
+        assert.ok(Math.abs(first.vx + second.vx) < 1e-9, "forces must be equal and opposite");
+        assert.ok(Math.abs(second.vx - 1.2791) < 0.001, `expected single application, got ${second.vx}`);
+    });
+
+    it("keeps the dragged node position fixed", () => {
+        const dragged = makeNode(0, 0);
+        const other = makeNode(2, 0);
+        applyLocalForces([dragged, other], { kRepel: 2200, cutoff: 160, minGap: 6, pinned: dragged });
+        assert.strictEqual(dragged.x, 0);
+        assert.strictEqual(dragged.y, 0);
+        assert.ok(other.x > 2);
+    });
+});
+
+describe("monitor dependency graph", () => {
+    it("separates overlapping dependency nodes with collision force", () => {
+        const first = { x: 0, y: 0, vx: 0, vy: 0, radius: 8 };
+        const second = { x: 2, y: 0, vx: 0, vy: 0, radius: 8 };
+        applyCollisionForce([first, second], { minGap: 6 });
+        assert.ok(first.vx < 0);
+        assert.ok(second.vx > 0);
+    });
+
+    it("links each child monitor to its real parent monitor without synthetic nodes", () => {
+        const nodes = [
+            { id: "MON_1", monitorId: 1, type: "group" },
+            { id: "MON_2", monitorId: 2, type: "ping" },
+            { id: "MON_3", monitorId: 3, type: "ping" },
+        ];
+        const monitors = [
+            { id: 1, type: "group", parent: null },
+            { id: 2, type: "ping", parent: 1 },
+            { id: 3, type: "ping", parent: 1 },
+        ];
+        const links = buildDependencyLinks(monitors, nodes, 80);
+        assert.strictEqual(links.length, 2);
+        assert.strictEqual(links[0].source, nodes[0]);
+        assert.strictEqual(links[0].target, nodes[1]);
+        assert.strictEqual(links[1].target, nodes[2]);
+    });
+
+    it("builds a pure monitor dependency graph matching the user requirements", () => {
+        const monitors = [
+            { id: 10, name: "Database Primary", type: "postgres", parent: null },
+            { id: 20, name: "Backend API", type: "http", parent: 10 },
+            { id: 30, name: "Frontend Web", type: "http", parent: 20 },
+        ];
+        const nodes = monitors.map((m, index) => ({
+            id: `MON_${m.id}`,
+            monitorId: m.id,
+            label: m.name,
+            x: index * 40,
+            y: 0,
+            vx: 0,
+            vy: 0,
+            radius: 8,
+        }));
+        const links = buildDependencyLinks(monitors, nodes, 90);
+
+        assert.strictEqual(nodes.length, 3);
+        assert.strictEqual(links.length, 2);
+        assert.strictEqual(links[0].source.id, "MON_10");
+        assert.strictEqual(links[0].target.id, "MON_20");
+        assert.strictEqual(links[1].source.id, "MON_20");
+        assert.strictEqual(links[1].target.id, "MON_30");
+    });
+});
 
 describe("drag group with children", () => {
     it("moves children proportionally when a group is dragged", () => {
-        const group = { id: "GRP_A", group: "A", x: 100, y: 100, vx: 0, vy: 0 };
-        const child1 = { id: "C1", group: "A", x: 120, y: 100, vx: 0, vy: 0 };
-        const child2 = { id: "C2", group: "A", x: 80, y: 100, vx: 0, vy: 0 };
+        const group = { id: "GRP_A", group: "A", x: 100, y: 100, anchorX: 100, anchorY: 100, vx: 4, vy: 5 };
+        const child1 = { id: "C1", group: "A", x: 120, y: 100, anchorX: 120, anchorY: 100, vx: 2, vy: 3 };
+        const child2 = { id: "C2", group: "A", x: 80, y: 100, anchorX: 80, anchorY: 100, vx: -2, vy: 1 };
         const otherChild = { id: "C3", group: "B", x: 50, y: 50, vx: 0, vy: 0 };
         const allNodes = [group, child1, child2, otherChild];
 
@@ -29,8 +133,49 @@ describe("drag group with children", () => {
         assert.strictEqual(child1.y, 150);
         assert.strictEqual(child2.x, 130);
         assert.strictEqual(child2.y, 150);
+        assert.strictEqual(group.anchorX, 150);
+        assert.strictEqual(child1.anchorX, 170);
+        assert.strictEqual(child1.anchorY, 150);
+        assert.strictEqual(child2.anchorX, 130);
+        assert.strictEqual(child2.anchorY, 150);
+        assert.strictEqual(child1.vx, 0);
+        assert.strictEqual(child1.vy, 0);
+        assert.strictEqual(child2.vx, 0);
+        assert.strictEqual(child2.vy, 0);
         assert.strictEqual(otherChild.x, 50);
         assert.strictEqual(otherChild.y, 50);
+    });
+
+    it("applies fluid spring momentum to children when dragged in fluid mode", () => {
+        const group = { id: "GRP_A", group: "A", x: 100, y: 100, vx: 0, vy: 0 };
+        const child1 = { id: "C1", group: "A", x: 120, y: 100, vx: 0, vy: 0 };
+        const allNodes = [group, child1];
+
+        dragGroupWithChildren(group, 150, 150, allNodes, { fluid: true });
+
+        assert.strictEqual(group.x, 150);
+        assert.strictEqual(group.y, 150);
+        // In fluid mode, child position is not locked rigidly 1:1, but child gains flow velocity
+        assert.strictEqual(child1.x, 120);
+        assert.ok(child1.vx > 0);
+        assert.ok(child1.vy > 0);
+    });
+    it("reheats movable nodes without affecting fixed nodes", () => {
+        const nodes = [
+            { type: "ATM", vx: 0, vy: 0 },
+            { type: "kantor", vx: 0, vy: 0 },
+            { type: "core", vx: 0, vy: 0 },
+            { type: "tag", vx: 0, vy: 0 },
+        ];
+
+        reheatSimulationNodes(nodes);
+
+        assert.ok(Math.hypot(nodes[0].vx, nodes[0].vy) > 0);
+        assert.ok(Math.hypot(nodes[1].vx, nodes[1].vy) > 0);
+        assert.strictEqual(nodes[2].vx, 0);
+        assert.strictEqual(nodes[2].vy, 0);
+        assert.strictEqual(nodes[3].vx, 0);
+        assert.strictEqual(nodes[3].vy, 0);
     });
 });
 
@@ -54,6 +199,17 @@ describe("NOC graph radial layout", () => {
         pos.children.forEach(child => {
             const dist = Math.hypot(child.x - pos.x, child.y - pos.y);
             assert.ok(Math.abs(dist - 70) < 1, `child distance ${dist} should be ~70`);
+        });
+    });
+
+    it("spreads a large cluster over bounded rings without overlapping siblings", () => {
+        const pos = computeRadialLayout(["X"], { X: 100 }, { groupOrbit: 200, leafOrbit: 76 }).get("X");
+        assert.strictEqual(pos.children.length, 100);
+        pos.children.forEach((child, index) => {
+            assert.ok(Math.hypot(child.x - pos.x, child.y - pos.y) <= 150);
+            for (let j = 0; j < index; j++) {
+                assert.ok(Math.hypot(child.x - pos.children[j].x, child.y - pos.children[j].y) >= 15);
+            }
         });
     });
 
@@ -127,6 +283,36 @@ describe("NOC graph cluster balancing", () => {
 });
 
 describe("NOC graph leaf radial layout", () => {
+    it("pushes a core-facing child outward from its parent while preserving its side", () => {
+        const parent = { type: "kantor", x: 600, y: 0 };
+        const child = { type: "ATM", x: 550, y: 0, vx: 0, vy: 0, clusterIndex: 2 };
+
+        applyClusterBlossomForce(child, parent, { linkDistance: 80 });
+
+        assert.ok(child.vx < 0, `core-facing child should stay on its side of the group: ${child.vx}`);
+        assert.strictEqual(child.vy, 0);
+    });
+
+    it("does not rotate a child toward the core when correcting its radius", () => {
+        const parent = { type: "kantor", x: 600, y: 0 };
+        const child = { type: "ATM", x: 600, y: 50, vx: 0, vy: 0, clusterIndex: 0 };
+
+        applyClusterBlossomForce(child, parent, { linkDistance: 80 });
+
+        assert.strictEqual(child.vx, 0);
+        assert.ok(child.vy > 0);
+    });
+
+    it("brings a distant child back to the group without collapsing onto its center", () => {
+        const parent = { type: "kantor", x: 600, y: 0 };
+        const child = { type: "ATM", x: 850, y: 0, vx: 0, vy: 0, clusterIndex: 0 };
+
+        applyClusterBlossomForce(child, parent, { linkDistance: 80 });
+
+        assert.ok(child.vx < 0);
+        assert.strictEqual(child.vy, 0);
+    });
+
     it("pushes a leaf outward when it sits between the core and its parent", () => {
         const parent = { type: "kantor", x: 100, y: 0 };
         const leaf = { type: "ATM", x: 40, y: 0, vx: 0, vy: 0 };

@@ -11,7 +11,7 @@
                         <span class="noc-title">TOPOLOGI JARINGAN GRAPH VIEW</span>
                         <span class="noc-badge-obsidian">Obsidian View • 60 FPS</span>
                     </div>
-                    <p class="noc-subtitle mb-0">Visualisasi Realtime Interaktif Jaringan ATM, Kantor Cabang & Link Backup</p>
+                    <p class="noc-subtitle mb-0">Visualisasi Realtime Dependensi Monitor (Parent → Child)</p>
                 </div>
             </div>
 
@@ -129,6 +129,10 @@
                         <label class="text-secondary small fw-semibold mb-1 d-block">Tipe Node Tampil:</label>
                         <div class="d-flex flex-wrap gap-2 small">
                             <label class="d-flex align-items-center gap-1 cursor-pointer">
+                                <input v-model="showGroups" type="checkbox" class="form-check-input" />
+                                <span>Grup</span>
+                            </label>
+                            <label class="d-flex align-items-center gap-1 cursor-pointer">
                                 <input v-model="showAtm" type="checkbox" class="form-check-input" />
                                 <span>ATM</span>
                             </label>
@@ -139,10 +143,6 @@
                             <label class="d-flex align-items-center gap-1 cursor-pointer">
                                 <input v-model="showBackup" type="checkbox" class="form-check-input" />
                                 <span>Backup</span>
-                            </label>
-                            <label class="d-flex align-items-center gap-1 cursor-pointer">
-                                <input v-model="showAtmTag" type="checkbox" class="form-check-input" />
-                                <span>Tag ATM</span>
                             </label>
                         </div>
                     </div>
@@ -170,8 +170,7 @@
                             </div>
                         </div>
 
-                        <!-- Info mode cluster / status fisika (Prioritas 4) -->
-                        <div class="noc-physics-status small font-mono" :class="physicsStatusClass">
+                        <div class="noc-physics-status small font-mono mb-2" :class="physicsStatusClass">
                             <div class="d-flex align-items-center justify-content-between">
                                 <span>MODE FISIKA</span>
                                 <span class="fw-bold">{{ physicsModeLabel }}</span>
@@ -185,14 +184,6 @@
                             </div>
                         </div>
 
-                        <div class="d-flex align-items-center justify-content-between mb-2">
-                            <span class="text-secondary small">Garis Tag Selalu Tampil:</span>
-                            <div class="form-check form-switch mb-0">
-                                <input v-model="showTagLinesAlways" class="form-check-input" type="checkbox" />
-                            </div>
-                        </div>
-
-                        <!-- Distance slider -->
                         <div class="mt-2">
                             <div class="d-flex justify-content-between text-secondary small">
                                 <span>Jarak Pegas Link:</span>
@@ -202,13 +193,12 @@
                         </div>
                     </div>
 
-                    <!-- Navigation Action Buttons -->
                     <div class="d-flex gap-2 border-top border-secondary-subtle pt-2">
-                        <button class="btn btn-sm btn-outline-secondary w-50" title="Reset Posisi Kamera" @click="resetCamera">
+                        <button type="button" class="btn btn-sm btn-outline-secondary w-50" title="Reset Posisi Kamera" @click="resetCamera">
                             Reset View
                         </button>
-                        <button class="btn btn-sm btn-outline-primary w-50" title="Ratakan Kembali Posisi" @click="reheatSimulation">
-                            Re-Layout
+                        <button type="button" class="btn btn-sm btn-outline-primary w-50" title="Susun Ulang Posisi Node" @click="resetLayout">
+                            Reset Layout
                         </button>
                     </div>
                 </div>
@@ -218,8 +208,8 @@
             <div class="noc-floating-legend">
                 <div class="d-flex flex-wrap align-items-center gap-3 font-mono small">
                     <div class="d-flex align-items-center gap-2">
-                        <span class="legend-circle core"></span>
-                        <span class="text-light">DC Core</span>
+                        <span class="legend-circle group"></span>
+                        <span class="text-light">Grup ({{ stats.group }})</span>
                     </div>
                     <div class="d-flex align-items-center gap-2">
                         <span class="legend-circle kantor"></span>
@@ -234,8 +224,8 @@
                         <span class="text-warning">Backup ({{ stats.backup }})</span>
                     </div>
                     <div class="d-flex align-items-center gap-2">
-                        <span class="legend-circle tag"></span>
-                        <span class="text-info">Tag ISP</span>
+                        <span class="legend-line"></span>
+                        <span class="text-info">Parent → Child</span>
                     </div>
                     <div class="vr bg-secondary opacity-50"></div>
                     <div class="d-flex align-items-center gap-2">
@@ -257,6 +247,7 @@
             <div
                 v-if="hoveredNode"
                 class="noc-graph-tooltip"
+                :data-live-tick="liveTick"
                 :style="{ left: tooltipPos.x + 'px', top: tooltipPos.y + 'px' }"
             >
                 <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
@@ -286,17 +277,18 @@
 
 <script>
 import dayjs from "dayjs";
+import { markRaw } from "vue";
 import { UP, DOWN } from "../util.ts";
 import {
-    buildNodesByGroup,
     getRepelWeight,
-    applyClusterRepulsion,
+    applyLocalForces,
+    buildDependencyLinks,
+    applySpringForce,
+    applyCenterGravity,
     collectStatusChangedNodes,
     shouldTriggerMicroReheat,
     applyMicroReheatImpulse,
-    getClusterRepulsion,
-    computeRadialLayout,
-    dragGroupWithChildren,
+    reheatSimulationNodes,
 } from "../noc-graph-cluster";
 
 export default {
@@ -311,17 +303,14 @@ export default {
             searchQuery: "",
             selectedGroup: "ALL",
             statusFilter: "ALL",
+            showGroups: true,
             showAtm: true,
             showKantor: true,
             showBackup: true,
-            showAtmTag: false, // Default mati agar tidak membuat jaring laba-laba ke semua node ATM
-            showTagNodes: true,
-            showTagLinesAlways: true, // Garis tag selalu tampil (matikan = hanya saat hover)
             enableParticles: true,
             alwaysShowLabels: false,
             isPhysicsActive: true,
             isPhysicsSleeping: false,
-            physicsNodeLimit: 180,
             physicsStableFrames: 0,
             linkDistance: 80,
 
@@ -336,8 +325,7 @@ export default {
             nodes: [],
             links: [],
             particles: [],
-            nodesByGroup: new Map(),
-            groupMembers: new Map(),
+            liveTick: 0,
 
             // Interaction State
             hoveredNode: null,
@@ -345,6 +333,8 @@ export default {
             canvasSize: { width: 0, height: 0 },
             isDragging: false,
             draggedNode: null,
+            dragLastWorld: null,
+            dragVelocity: { x: 0, y: 0 },
             isPanning: false,
             panStart: { x: 0, y: 0 },
 
@@ -360,11 +350,11 @@ export default {
         };
     },
     computed: {
-        // Enriched list of all monitors (excluding type 'group')
+        // Enriched list of all monitors
         allMonitors() {
             const rawSource = this.$root.monitorList || {};
 
-            const list = Object.values(rawSource).filter(m => m.type !== "group");
+            const list = Object.values(rawSource);
 
             return list.map(m => {
                 const groupName = (m.parent && rawSource[m.parent])
@@ -392,7 +382,7 @@ export default {
                 return {
                     ...m,
                     group: groupName,
-                    type: type,
+                    type: m.type === "group" ? "GROUP" : type,
                     tag: provider,
                     tags: rawTags,
                     tagColors: Object.fromEntries(rawTagObjects.map(t => [t.name, t.color])),
@@ -403,7 +393,7 @@ export default {
         // Signature topology: hanya berubah jika monitor ditambah, dihapus,
         // diubah namanya, grupnya, atau tag-nya.
         topologySignature() {
-            return this.allMonitors.map(m => `${m.id}:${m.name}:${m.group}:${m.type}:${m.tag}`).join("|");
+            return this.allMonitors.map(m => `${m.id}:${m.name}:${m.parent}:${m.group}:${m.type}:${m.tag}`).join("|");
         },
 
         availableGroups() {
@@ -419,21 +409,18 @@ export default {
             if (this.isPhysicsSleeping) {
                 return "STABIL";
             }
-            return this.nodes.length > this.physicsNodeLimit ? "CLUSTER CERDAS" : "FULL";
+            return "GLOBAL";
         },
 
         physicsStatusClass() {
-            return this.physicsModeLabel === "CLUSTER CERDAS" ? "text-warning" : "text-secondary";
+            return "text-secondary";
         },
 
         physicsStatusDetail() {
             if (!this.isPhysicsActive) {
                 return "Layout stabil; monitoring heartbeat tetap realtime.";
             }
-            if (this.nodes.length > this.physicsNodeLimit) {
-                return `${this.nodes.length} node; repulsi lokal per cluster aktif.`;
-            }
-            return `${this.nodes.length} node; force simulation aktif.`;
+            return `${this.nodes.length} node; repulsi, pegas, gravitasi, dan collision global aktif.`;
         },
 
         matchedNodeCount() {
@@ -455,8 +442,12 @@ export default {
             let atm = 0;
             let kantor = 0;
             let backup = 0;
+            let group = 0;
 
             this.allMonitors.forEach(m => {
+                if (m.type === "GROUP") {
+                    group++;
+                }
                 if (m.type === "ATM") {
                     atm++;
                 } else if (m.type === "KANTOR") {
@@ -477,7 +468,7 @@ export default {
                 }
             });
 
-            return { up, slow, down, atm, kantor, backup };
+            return { up, slow, down, atm, kantor, backup, group };
         },
     },
     watch: {
@@ -485,6 +476,9 @@ export default {
             this.syncGraphData();
         },
         selectedGroup() {
+            this.syncGraphData();
+        },
+        showGroups() {
             this.syncGraphData();
         },
         showAtm() {
@@ -496,12 +490,6 @@ export default {
         showBackup() {
             this.syncGraphData();
         },
-        showAtmTag() {
-            this.syncGraphData();
-        },
-        showTagNodes() {
-            this.syncGraphData();
-        },
         linkDistance() {
             this.updateLinkDistances();
         },
@@ -509,6 +497,7 @@ export default {
             if (active) {
                 this.physicsStableFrames = 0;
                 this.isPhysicsSleeping = false;
+                reheatSimulationNodes(this.nodes, 2);
             }
         },
         statusFilter() {
@@ -646,7 +635,6 @@ export default {
         // rebuilding the topology or resetting node positions.
         refreshNodeStatuses() {
             let statusChanged = false;
-            let hasAnyDown = false;
 
             this.nodes.forEach(node => {
                 if (node.monitorId === undefined) {
@@ -671,21 +659,8 @@ export default {
 
                 node.ping = ping;
                 node.repelWeight = getRepelWeight(node);
-
-                if (status === "down") {
-                    hasAnyDown = true;
-                }
             });
-
-            const core = this.nodes.find(node => node.type === "core");
-            if (core) {
-                const coreStatus = hasAnyDown ? "down" : "up";
-                if (core.status !== coreStatus) {
-                    statusChanged = true;
-                    core.previousStatus = core.status;
-                    core.status = coreStatus;
-                }
-            }
+            this.liveTick++;
 
             // Realtime Reactive Micro-Reheat: awaken physics gently only when
             // nodes transition to or from DOWN status.
@@ -746,37 +721,12 @@ export default {
             this.initCanvas(true);
         },
 
-        // Build Graph Nodes and Links from Uptime Kuma monitors
-        syncGraphData(initial = false) {
-            this.physicsStableFrames = 0;
-            const existingNodeMap = new Map();
-            this.nodes.forEach(n => existingNodeMap.set(n.id, n));
-
-            const newNodes = [];
-            const newLinks = [];
-            const groupNodeMap = new Map();
-            const tagNodeMap = new Map();
-
-            // 1. Core Root Node: DC PUSAT
-            const coreId = "CORE_DC";
-            const existingCore = existingNodeMap.get(coreId);
-            const coreNode = {
-                id: coreId,
-                label: "DC PUSAT / NOC CORE",
-                type: "core",
-                radius: 17,
-                status: "up",
-                x: existingCore ? existingCore.x : 0,
-                y: existingCore ? existingCore.y : 0,
-                vx: existingCore ? existingCore.vx : 0,
-                vy: existingCore ? existingCore.vy : 0,
-                connectedCount: 0,
-            };
-            newNodes.push(coreNode);
-
-            // Filter monitors based on active UI controls
-            const filteredMonitors = this.allMonitors.filter(m => {
+        buildDependencyGraph(monitors, existingNodeMap) {
+            const visible = monitors.filter(m => {
                 if (this.selectedGroup !== "ALL" && m.group !== this.selectedGroup) {
+                    return false;
+                }
+                if (!this.showGroups && m.type === "GROUP") {
                     return false;
                 }
                 if (!this.showAtm && m.type === "ATM") {
@@ -788,292 +738,91 @@ export default {
                 if (!this.showBackup && m.type === "BACKUP") {
                     return false;
                 }
-
                 const beat = this.getBeat(m.id);
                 const isDown = beat && beat.status === DOWN;
-
-                if (this.statusFilter === "UP" && isDown) {
-                    return false;
-                }
-                if (this.statusFilter === "DOWN" && !isDown) {
-                    return false;
-                }
-
-                return true;
+                return !(this.statusFilter === "UP" && isDown) && !(this.statusFilter === "DOWN" && !isDown);
             });
-
-            // Gather unique groups represented in filtered monitors
-            const activeGroups = new Set();
-            filteredMonitors.forEach(m => activeGroups.add(m.group));
-
-            // 2. Create Group / Kantor Cluster Nodes (semua grup aktif muncul bersama anak-anaknya)
-            const groupList = Array.from(activeGroups);
-            const memberCounts = Object.fromEntries(groupList.map(group => [
-                group,
-                filteredMonitors.filter(m => m.group === group).length,
-            ]));
-            const radialLayout = computeRadialLayout(groupList, memberCounts, {
-                groupOrbit: 240,
-                leafOrbit: 76,
-            });
-
-            groupList.forEach((grp) => {
-                const grpId = "GRP_" + grp;
-                const radialPosition = radialLayout.get(grp);
-                const defaultX = radialPosition?.x ?? 0;
-                const defaultY = radialPosition?.y ?? 0;
-
-                const grpNode = {
-                    id: grpId,
-                    label: grp,
-                    group: grp,
-                    type: "kantor",
-                    radius: 9,
-                    status: "up",
-                    x: defaultX,
-                    y: defaultY,
-                    anchorX: defaultX,
-                    anchorY: defaultY,
-                    vx: 0,
-                    vy: 0,
+            const nodes = visible.map((monitor, index) => {
+                const existing = existingNodeMap.get(`MON_${monitor.id}`);
+                const angle = index * Math.PI * 2 / Math.max(visible.length, 1);
+                const beat = this.getBeat(monitor.id);
+                const status = beat?.status === DOWN ? "down" : beat?.ping > 150 ? "slow" : "up";
+                return markRaw({
+                    ...monitor,
+                    id: `MON_${monitor.id}`,
+                    monitorId: monitor.id,
+                    label: monitor.name,
+                    status,
+                    ping: beat?.ping || 0,
+                    radius: monitor.type === "GROUP" ? 11 : monitor.type === "BACKUP" ? 5.5 : 8,
+                    x: existing?.x ?? Math.cos(angle) * 220,
+                    y: existing?.y ?? Math.sin(angle) * 220,
+                    vx: existing?.vx ?? 0,
+                    vy: existing?.vy ?? 0,
                     connectedCount: 0,
-                };
-                newNodes.push(grpNode);
-                groupNodeMap.set(grp, grpNode);
-
-                newLinks.push({
-                    source: coreNode,
-                    target: grpNode,
-                    targetDist: this.linkDistance * 1.5,
-                    isBackup: false,
-                });
-                coreNode.connectedCount++;
-                grpNode.connectedCount++;
-            });
-
-            // 3. Create Tag / Provider Nodes (misal LA, Telkom, ICON+)
-            const activeTagColors = new Map();
-            filteredMonitors.forEach(m => {
-                (m.tags || []).forEach(tag => {
-                    if (!this.showAtmTag && tag.toLowerCase() === "atm") {
-                        return;
-                    }
-                    activeTagColors.set(tag, m.tagColors?.[tag] || "#14b8a6");
-                });
-                if (m.tag && m.tag !== "Non-Tag" && !activeTagColors.has(m.tag)) {
-                    if (!this.showAtmTag && m.tag.toLowerCase() === "atm") {
-                        return;
-                    }
-                    activeTagColors.set(m.tag, "#14b8a6");
-                }
-            });
-
-            const tagList = Array.from(activeTagColors.keys()).sort();
-            const tagAngleStep = (Math.PI * 2) / (tagList.length || 1);
-
-            tagList.forEach((tag, idx) => {
-                const isAtmTag = tag.toLowerCase() === "atm";
-                if (isAtmTag && !this.showAtmTag) {
-                    return;
-                }
-
-                const tagId = "TAG_" + tag;
-                const existing = existingNodeMap.get(tagId);
-
-                // Initial position: orbit luar, jauh dari cluster kantor
-                const angle = (idx * tagAngleStep) + (Math.PI / 4);
-                const dist = 330;
-                const defaultX = Math.cos(angle) * dist;
-                const defaultY = Math.sin(angle) * dist;
-
-                const color = activeTagColors.get(tag) || "#14b8a6";
-                const tagNode = {
-                    id: tagId,
-                    label: "TAG: " + tag,
-                    type: "tag",
-                    tag: tag,
-                    color: color,
-                    radius: 11,
-                    status: "up",
-                    x: existing ? existing.x : defaultX,
-                    y: existing ? existing.y : defaultY,
-                    vx: existing ? existing.vx : 0,
-                    vy: existing ? existing.vy : 0,
-                    connectedCount: 0,
-                };
-
-                newNodes.push(tagNode);
-                tagNodeMap.set(tag, tagNode);
-
-                // Link: DC Core -> Tag Provider Node
-                newLinks.push({
-                    source: coreNode,
-                    target: tagNode,
-                    targetDist: this.linkDistance * 1.3,
-                    isTagCoreLink: true,
-                    color: color,
-                    isBackup: false,
-                });
-                coreNode.connectedCount++;
-                tagNode.connectedCount++;
-            });
-
-            // 4. Create Leaf Nodes for ATM / Backup / Devices
-            let hasAnyDown = false;
-            const groupMemberCount = new Map();
-            const totalMembersByGroup = new Map();
-            filteredMonitors.forEach(m => {
-                totalMembersByGroup.set(m.group, (totalMembersByGroup.get(m.group) || 0) + 1);
-            });
-            filteredMonitors.forEach((m, idx) => {
-                const nodeId = "MON_" + m.id;
-                const parentGroup = groupNodeMap.get(m.group);
-
-                const beat = this.getBeat(m.id);
-                let status = "up";
-                let ping = beat && beat.ping ? beat.ping : 0;
-                if (beat && beat.status === DOWN) {
-                    status = "down";
-                    hasAnyDown = true;
-                } else if (beat && beat.ping > 150) {
-                    status = "slow";
-                }
-
-                const parentAngle = parentGroup ? Math.atan2(parentGroup.y, parentGroup.x) : idx * 0.7;
-                const angularSpread = ((idx % 7) - 3) * 0.18;
-                const finalAngle = parentAngle + angularSpread;
-                const spread = this.linkDistance * (0.8 + ((idx % 4) * 0.18));
-                const defaultX = parentGroup
-                    ? parentGroup.x + Math.cos(finalAngle) * spread
-                    : Math.cos(finalAngle) * 220;
-                const defaultY = parentGroup
-                    ? parentGroup.y + Math.sin(finalAngle) * spread
-                    : Math.sin(finalAngle) * 220;
-
-                const radius = m.type === "KANTOR" ? 8 : (m.type === "BACKUP" ? 5.5 : 4.5);
-                const clusterAngleIndex = groupMemberCount.get(m.group) || 0;
-                groupMemberCount.set(m.group, clusterAngleIndex + 1);
-
-                const radialGroup = radialLayout.get(m.group);
-                const radialChild = radialGroup?.children?.[clusterAngleIndex];
-                const resolvedDefaultX = radialChild?.x ?? defaultX;
-                const resolvedDefaultY = radialChild?.y ?? defaultY;
-
-                const node = {
-                    id: nodeId,
-                    monitorId: m.id,
-                    label: m.name,
-                    group: m.group,
-                    hostname: m.hostname,
-                    tag: m.tag,
-                    type: m.type,
-                    status: status,
-                    ping: ping,
-                    radius: radius,
-                    x: resolvedDefaultX,
-                    y: resolvedDefaultY,
-                    anchorX: resolvedDefaultX,
-                    anchorY: resolvedDefaultY,
-                    vx: 0,
-                    vy: 0,
-                    connectedCount: 1,
-                    clusterKey: m.group,
-                    parentId: parentGroup ? parentGroup.id : null,
-                    clusterAngleIndex: clusterAngleIndex,
-                    clusterIndex: clusterAngleIndex,
-                    repelWeight: getRepelWeight({ status }),
-                };
-
-                newNodes.push(node);
-
-                // 1) Link ke Grup Kantor Cabang
-                if (parentGroup) {
-                    newLinks.push({
-                        source: parentGroup,
-                        target: node,
-                        targetDist: this.linkDistance,
-                        isBackup: m.type === "BACKUP",
-                        memberCount: totalMembersByGroup.get(m.group) || 1,
-                    });
-                    parentGroup.connectedCount++;
-                }
-
-                // 2) Link ke Node Tag Provider (misal: LA, Telkom, ICON+, dsb.)
-                const monitorTags = new Set(m.tags || []);
-                if (m.tag && m.tag !== "Non-Tag") {
-                    monitorTags.add(m.tag);
-                }
-
-                monitorTags.forEach(t => {
-                    if (!this.showAtmTag && t.toLowerCase() === "atm") {
-                        return;
-                    }
-                    const tagNode = tagNodeMap.get(t);
-                    if (tagNode) {
-                        newLinks.push({
-                            source: tagNode,
-                            target: node,
-                            targetDist: this.linkDistance * 1.15,
-                            isTagLink: true,
-                            color: tagNode.color,
-                            isBackup: m.type === "BACKUP",
-                        });
-                        tagNode.connectedCount++;
-                        node.connectedCount++;
-                    }
                 });
             });
-
-            // If any node is down, Core status reflects warning
-            coreNode.status = hasAnyDown ? "down" : "up";
-
-            this.nodes = newNodes;
-            this.links = newLinks;
-            const nodesByGroup = buildNodesByGroup(newNodes);
-            this.nodesByGroup = nodesByGroup;
-            this.groupMembers = nodesByGroup;
-
-            // Generate particles along links
+            const links = buildDependencyLinks(visible, nodes, this.linkDistance).map(link => markRaw(link));
+            links.forEach(link => {
+                link.source.connectedCount++;
+                link.target.connectedCount++;
+            });
+            this.nodes = markRaw(nodes);
+            this.links = markRaw(links);
             this.initParticles();
+            this.liveTick++;
+        },
+
+        // Build Graph Nodes and Links from Uptime Kuma monitors
+        syncGraphData(initial = false) {
+            this.physicsStableFrames = 0;
+            const existingNodeMap = new Map();
+            this.nodes.forEach(n => existingNodeMap.set(n.id, n));
+            this.buildDependencyGraph(this.allMonitors, existingNodeMap);
         },
 
         initParticles() {
-            this.particles = [];
+            const particles = [];
             this.links.forEach(link => {
                 if (link.target.status !== "down") {
-                    this.particles.push({
+                    particles.push({
                         link: link,
                         t: Math.random(),
                         speed: 0.003 + (Math.random() * 0.004),
                     });
                 }
             });
+            this.particles = markRaw(particles);
         },
 
         updateLinkDistances() {
             this.links.forEach(l => {
-                if (l.source.type === "core") {
-                    l.targetDist = this.linkDistance * 1.5;
-                } else {
-                    l.targetDist = this.linkDistance;
-                }
+                l.targetDist = this.linkDistance;
             });
+            this.physicsStableFrames = 0;
+            this.isPhysicsSleeping = false;
         },
 
-        reheatSimulation() {
-            this.physicsStableFrames = 0;
-            this.nodes.forEach(n => {
-                if (n.type !== "core" && n.type !== "tag") {
-                    n.vx += (Math.random() - 0.5) * 5;
-                    n.vy += (Math.random() - 0.5) * 5;
-                }
+        resetLayout() {
+            const count = Math.max(this.nodes.length, 1);
+            this.nodes.forEach((node, index) => {
+                const angle = index * Math.PI * 2 / count;
+                node.x = Math.cos(angle) * 220;
+                node.y = Math.sin(angle) * 220;
+                node.vx = 0;
+                node.vy = 0;
             });
+            this.physicsStableFrames = 0;
+            this.isPhysicsSleeping = false;
             this.isPhysicsActive = true;
         },
 
         triggerMicroReheat(target) {
+            if (!this.isPhysicsActive) {
+                return;
+            }
             this.physicsStableFrames = 0;
-            this.isPhysicsActive = true;
+            this.isPhysicsSleeping = false;
 
             let targets = [];
             if (Array.isArray(target) && target.length > 0) {
@@ -1135,101 +884,64 @@ export default {
         // PHYSICS ENGINE LOOP (FORCE-DIRECTED 60 FPS)
         // ==========================================
         updatePhysics() {
-            if (!this.isPhysicsActive || this.isPhysicsSleeping) {
+            if ((!this.isPhysicsActive || this.isPhysicsSleeping) && !this.isDragging) {
                 return;
             }
 
             const nodes = this.nodes;
-            const nodeCount = nodes.length;
-            const isLargeTopology = nodeCount > this.physicsNodeLimit;
-
-            const kRepel = isLargeTopology ? 1600 : 2400;
-            const damping = isLargeTopology ? 0.80 : 0.86;
-            const maxRepelDistSq = isLargeTopology ? 25000 : 90000;
-
-            // 1. Collision repulsion: only separate overlapping nodes
-            const clusterMap = this.nodesByGroup || this.groupMembers;
-            if (clusterMap && clusterMap.size > 0) {
-                for (const members of clusterMap.values()) {
-                    applyClusterRepulsion(members, {
-                        kRepel: getClusterRepulsion(members.length, kRepel),
-                        maxRepelDistSq,
-                        minGap: 6,
-                    });
-                }
+            const links = this.links;
+            if (!nodes.length) {
+                return;
             }
 
-            // 2. Anchor spring: pull every node toward its radial layout position
-            const kAnchor = 0.08;
-            for (let i = 0; i < nodeCount; i++) {
-                const n = nodes[i];
-                if (n.type === "core" || n.type === "tag") {
-                    continue;
-                }
-                if (this.draggedNode === n) {
-                    continue;
-                }
-                if (n.anchorX !== undefined && n.anchorY !== undefined) {
-                    n.vx += (n.anchorX - n.x) * kAnchor;
-                    n.vy += (n.anchorY - n.y) * kAnchor;
-                }
+            if (this.isDragging && this.draggedNode && this.dragLastWorld) {
+                const node = this.draggedNode;
+                const dx = (this.dragLastWorld.x - node.x) * 0.35;
+                const dy = (this.dragLastWorld.y - node.y) * 0.35;
+                node.x += dx;
+                node.y += dy;
+                this.dragVelocity = { x: dx, y: dy };
             }
 
-            // 3. Apply velocity & friction and measure movement
+            if (!this.isPhysicsActive) {
+                return;
+            }
+
+            nodes.forEach((node) => {
+                node.vx = node.vx || 0;
+                node.vy = node.vy || 0;
+            });
+            const dragged = this.isDragging ? this.draggedNode : null;
+            links.forEach(link => applySpringForce(link, { kSpring: 0.035 }));
+            applyCenterGravity(nodes, 0.003);
+            applyLocalForces(nodes, { kRepel: 2200, cutoff: 160, minGap: 6, pinned: dragged });
+
             let maxMovement = 0;
-            for (let i = 0; i < nodeCount; i++) {
-                const n = nodes[i];
-
-                // Core DC fixed at origin
-                if (n.type === "core" && this.draggedNode !== n) {
-                    n.x = 0;
-                    n.y = 0;
-                    n.vx = 0;
-                    n.vy = 0;
-                    continue;
+            nodes.forEach((node) => {
+                if (node === this.draggedNode) {
+                    node.vx = 0;
+                    node.vy = 0;
+                    return;
                 }
-
-                // Tag nodes pinned / statis (kecuali saat di-drag manual oleh user)
-                if (n.type === "tag" && this.draggedNode !== n) {
-                    n.vx = 0;
-                    n.vy = 0;
-                    continue;
+                node.vx *= 0.88;
+                node.vy *= 0.88;
+                const speed = Math.hypot(node.vx, node.vy);
+                if (speed > 12) {
+                    node.vx = node.vx / speed * 12;
+                    node.vy = node.vy / speed * 12;
                 }
-
-                // If currently dragged with mouse, position is pinned
-                if (this.draggedNode === n) {
-                    n.vx = 0;
-                    n.vy = 0;
-                    continue;
-                }
-
-                n.vx *= damping;
-                n.vy *= damping;
-
-                // Speed limit to avoid teleporting
-                const speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
-                const maxSpeed = 12;
-                if (speed > maxSpeed) {
-                    n.vx = (n.vx / speed) * maxSpeed;
-                    n.vy = (n.vy / speed) * maxSpeed;
-                }
-
-                n.x += n.vx;
-                n.y += n.vy;
-
-                if (speed > maxMovement) {
-                    maxMovement = speed;
-                }
-            }
-
-            // Masuk mode sleep hemat CPU saat gerakan sudah sangat stabil
-            if (maxMovement < 0.12 && !this.draggedNode) {
+                node.x += node.vx;
+                node.y += node.vy;
+                maxMovement = Math.max(maxMovement, speed);
+            });
+            if (maxMovement < 0.08 && !this.draggedNode && !this.isDragging) {
                 this.physicsStableFrames++;
-                if (this.physicsStableFrames > 25) {
+                if (this.physicsStableFrames > 60) {
                     this.isPhysicsSleeping = true;
                 }
             } else {
                 this.physicsStableFrames = 0;
+                this.isPhysicsSleeping = false;
             }
         },
 
@@ -1305,17 +1017,7 @@ export default {
                 ctx.moveTo(src.x, src.y);
                 ctx.lineTo(tgt.x, tgt.y);
 
-                if (link.isTagLink || link.isTagCoreLink) {
-                    // Garis tag hanya referensi visual, bisa disembunyikan sampai di-hover
-                    if (!this.showTagLinesAlways && !isConnected) {
-                        continue;
-                    }
-
-                    ctx.setLineDash([2, 4]);
-                    const tagColor = link.color || "#14b8a6";
-                    ctx.strokeStyle = isConnected ? this.rgbaFromHex(tagColor, alpha * 1.5) : this.rgbaFromHex(tagColor, alpha * 0.6);
-                    ctx.lineWidth = isConnected ? 2.2 : 0.7;
-                } else if (link.isBackup) {
+                if (tgt.type === "BACKUP" && tgt.status !== "down") {
                     ctx.setLineDash([4, 4]);
                     ctx.strokeStyle = `rgba(245, 158, 11, ${alpha})`;
                     ctx.lineWidth = isConnected ? 2 : 1;
@@ -1400,23 +1102,17 @@ export default {
                 ctx.beginPath();
                 ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
 
-                if (node.type === "core") {
+                if (node.type === "GROUP") {
                     ctx.fillStyle = node.status === "down" ? "#ef4444" : "#0284c7";
                     ctx.fill();
                     ctx.strokeStyle = "#38bdf8";
-                    ctx.lineWidth = 3;
+                    ctx.lineWidth = 2;
                     ctx.stroke();
-                } else if (node.type === "kantor") {
+                } else if (node.type === "KANTOR") {
                     ctx.fillStyle = node.status === "down" ? "#ef4444" : "#8b5cf6";
                     ctx.fill();
                     ctx.strokeStyle = "#a78bfa";
                     ctx.lineWidth = 1.5;
-                    ctx.stroke();
-                } else if (node.type === "tag") {
-                    ctx.fillStyle = node.color || "#14b8a6";
-                    ctx.fill();
-                    ctx.strokeStyle = "#ffffff";
-                    ctx.lineWidth = 2.5;
                     ctx.stroke();
                 } else if (node.type === "BACKUP") {
                     ctx.fillStyle = node.status === "down" ? "#ef4444" : "#f59e0b";
@@ -1449,16 +1145,16 @@ export default {
                 let shouldDrawLabel = false;
                 if (this.alwaysShowLabels || isHovered || matchesSearch) {
                     shouldDrawLabel = true;
-                } else if (node.type === "core" || node.type === "tag") {
+                } else if (node.type === "GROUP") {
                     shouldDrawLabel = this.camera.scale >= 0.7;
-                } else if (node.type === "kantor") {
+                } else if (node.type === "KANTOR") {
                     shouldDrawLabel = this.camera.scale >= 0.75;
                 } else if (isEndpoint) {
                     shouldDrawLabel = isZoomedClose && node.status === "down";
                 }
 
                 if (shouldDrawLabel && alpha > 0.3) {
-                    ctx.font = (node.type === "core" || node.type === "tag") ? "bold 11px monospace" : (node.type === "kantor" ? "bold 10px monospace" : "9px monospace");
+                    ctx.font = node.type === "GROUP" ? "bold 11px monospace" : (node.type === "KANTOR" ? "bold 10px monospace" : "9px monospace");
                     ctx.textAlign = "center";
                     ctx.textBaseline = "top";
 
@@ -1552,7 +1248,11 @@ export default {
             if (hit) {
                 this.isDragging = true;
                 this.draggedNode = hit;
+                this.dragLastWorld = { x: worldX, y: worldY };
+                this.dragVelocity = { x: 0, y: 0 };
                 this.hoveredNode = hit;
+                this.physicsStableFrames = 0;
+                this.isPhysicsSleeping = false;
                 this.setTooltipPos(clientX, clientY);
             } else {
                 this.isPanning = true;
@@ -1564,15 +1264,9 @@ export default {
             const { worldX, worldY, clientX, clientY } = this.getCanvasMouseWorld(e);
 
             if (this.isDragging && this.draggedNode) {
-                if (this.draggedNode.type === "kantor") {
-                    dragGroupWithChildren(this.draggedNode, worldX, worldY, this.nodes);
-                } else {
-                    this.draggedNode.x = worldX;
-                    this.draggedNode.y = worldY;
-                }
-                this.draggedNode.vx = 0;
-                this.draggedNode.vy = 0;
                 this.physicsStableFrames = 0;
+                this.isPhysicsSleeping = false;
+                this.dragLastWorld = { x: worldX, y: worldY };
                 this.setTooltipPos(clientX, clientY);
                 return;
             }
@@ -1593,38 +1287,31 @@ export default {
             }
         },
 
-        returnDraggedGroupToAnchor() {
-            const group = this.draggedNode;
-            if (!group || group.type !== "kantor") {
-                return;
-            }
-            const dx = group.anchorX - group.x;
-            const dy = group.anchorY - group.y;
-            group.x = group.anchorX;
-            group.y = group.anchorY;
-            this.nodes.forEach(node => {
-                if (node !== group && node.group === group.group && node.type !== "tag") {
-                    node.x += dx;
-                    node.y += dy;
-                }
-            });
-        },
-
         onMouseUp() {
-            this.returnDraggedGroupToAnchor();
+            if (this.isDragging && this.draggedNode) {
+                this.draggedNode.vx = (this.dragVelocity?.x || 0) * 1.5;
+                this.draggedNode.vy = (this.dragVelocity?.y || 0) * 1.5;
+            }
             this.isDragging = false;
             this.draggedNode = null;
+            this.dragLastWorld = null;
             this.isPanning = false;
             this.physicsStableFrames = 0;
+            this.isPhysicsSleeping = false;
         },
 
         onMouseLeave() {
-            this.returnDraggedGroupToAnchor();
+            if (this.isDragging && this.draggedNode) {
+                this.draggedNode.vx = (this.dragVelocity?.x || 0) * 1.5;
+                this.draggedNode.vy = (this.dragVelocity?.y || 0) * 1.5;
+            }
             this.isDragging = false;
             this.draggedNode = null;
+            this.dragLastWorld = null;
             this.isPanning = false;
             this.hoveredNode = null;
             this.physicsStableFrames = 0;
+            this.isPhysicsSleeping = false;
         },
 
         onWheel(e) {
@@ -1677,14 +1364,11 @@ export default {
         },
 
         getBadgeClass(node) {
-            if (node.type === "core") {
+            if (node.type === "GROUP") {
                 return "bg-primary";
             }
-            if (node.type === "kantor") {
+            if (node.type === "KANTOR") {
                 return "bg-purple-subtle text-purple";
-            }
-            if (node.type === "tag") {
-                return "bg-success-subtle text-success";
             }
             if (node.type === "BACKUP") {
                 return "bg-warning-subtle text-warning";
@@ -1949,18 +1633,20 @@ export default {
     border-radius: 50%;
 }
 
-.legend-circle.core {
+.legend-circle.group {
     background: #0284c7;
     border: 1.5px solid #38bdf8;
 }
 
-.legend-circle.kantor {
-    background: #8b5cf6;
+.legend-line {
+    display: inline-block;
+    width: 18px;
+    height: 2px;
+    background: rgba(56, 189, 248, 0.8);
 }
 
-.legend-circle.tag {
-    background: #14b8a6;
-    border: 1px solid #5eead4;
+.legend-circle.kantor {
+    background: #8b5cf6;
 }
 
 .legend-circle.atm {

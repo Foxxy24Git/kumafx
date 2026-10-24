@@ -109,6 +109,164 @@ export function applyClusterRepulsion(nodes, options = {}) {
 }
 
 /**
+ * Applies cutoff-based repulsion and collision using a spatial grid.
+ * @param {Array<object>} nodes Graph nodes.
+ * @param {object} options Physics parameters.
+ * @returns {void}
+ */
+export function applyLocalForces(nodes, options = {}) {
+    const count = nodes.length;
+    if (count < 2) {
+        return;
+    }
+    const cutoff = options.cutoff ?? 160;
+    const cutoffSq = cutoff * cutoff;
+    const minGap = options.minGap ?? 6;
+    const kRepel = options.kRepel ?? 2200;
+    const pinned = options.pinned;
+    const cellX = new Int32Array(count);
+    const cellY = new Int32Array(count);
+    const weight = new Float64Array(count);
+    const grid = new Map();
+    for (let i = 0; i < count; i++) {
+        const node = nodes[i];
+        const cx = Math.floor(node.x / cutoff);
+        const cy = Math.floor(node.y / cutoff);
+        cellX[i] = cx;
+        cellY[i] = cy;
+        weight[i] = node.status === "down" ? 1.5 : 1;
+        const key = cx * 65536 + cy;
+        const bucket = grid.get(key);
+        if (bucket) {
+            bucket.push(i);
+        } else {
+            grid.set(key, [ i ]);
+        }
+    }
+    for (let i = 0; i < count; i++) {
+        const node = nodes[i];
+        const nodeRadius = node.radius || 5;
+        for (let offsetX = -1; offsetX <= 1; offsetX++) {
+            for (let offsetY = -1; offsetY <= 1; offsetY++) {
+                const bucket = grid.get((cellX[i] + offsetX) * 65536 + cellY[i] + offsetY);
+                if (!bucket) {
+                    continue;
+                }
+                for (let b = 0; b < bucket.length; b++) {
+                    const j = bucket[b];
+                    if (j <= i) {
+                        continue;
+                    }
+                    const other = nodes[j];
+                    let dx = other.x - node.x;
+                    let dy = other.y - node.y;
+                    let distanceSq = dx * dx + dy * dy;
+                    if (distanceSq > cutoffSq) {
+                        continue;
+                    }
+                    if (distanceSq < 0.0001) {
+                        dx = 0.5;
+                        dy = 0;
+                        distanceSq = 0.25;
+                    }
+                    const distance = Math.sqrt(distanceSq);
+                    const minimumDistance = nodeRadius + (other.radius || 5) + minGap;
+                    const overlap = minimumDistance - distance;
+                    const force = kRepel / (distanceSq + 120) + (overlap > 0 ? overlap * 0.8 : 0);
+                    const ux = dx / distance;
+                    const uy = dy / distance;
+                    const fx = ux * force;
+                    const fy = uy * force;
+                    if (node !== pinned) {
+                        node.vx -= fx * weight[i];
+                        node.vy -= fy * weight[i];
+                        if (overlap > 0) {
+                            node.x -= ux * overlap * 0.5;
+                            node.y -= uy * overlap * 0.5;
+                        }
+                    }
+                    if (other !== pinned) {
+                        other.vx += fx * weight[j];
+                        other.vy += fy * weight[j];
+                        if (overlap > 0) {
+                            other.x += ux * overlap * 0.5;
+                            other.y += uy * overlap * 0.5;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Pushes apart overlapping nodes across the active graph.
+ * @param {Array<object>} nodes Graph nodes.
+ * @param {object} options Collision parameters.
+ * @returns {void}
+ */
+export function applyCollisionForce(nodes, options = {}) {
+    const minGap = options.minGap ?? 6;
+    for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+            const first = nodes[i];
+            const second = nodes[j];
+            let dx = second.x - first.x;
+            let dy = second.y - first.y;
+            const distance = Math.hypot(dx, dy) || 0.001;
+            const minDist = (first.radius || 5) + (second.radius || 5) + minGap;
+            if (distance < minDist) {
+                if (distance < 0.01) {
+                    const angle = ((i * 17 + j * 31) % 100) / 100 * Math.PI * 2;
+                    dx = Math.cos(angle) * 0.5;
+                    dy = Math.sin(angle) * 0.5;
+                }
+                const overlap = (minDist - distance);
+                const push = overlap * 0.5;
+                const fx = (dx / distance) * push;
+                const fy = (dy / distance) * push;
+                if (first.type !== "core") {
+                    first.x -= fx * 0.5;
+                    first.y -= fy * 0.5;
+                    first.vx -= fx * 0.4;
+                    first.vy -= fy * 0.4;
+                }
+                if (second.type !== "core") {
+                    second.x += fx * 0.5;
+                    second.y += fy * 0.5;
+                    second.vx += fx * 0.4;
+                    second.vy += fy * 0.4;
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Applies a blossom force that guides cluster nodes to bloom evenly around their parent.
+ * @param {object} node Leaf graph node.
+ * @param {object} parent Parent hub node.
+ * @param {object} options Blossom physics parameter options.
+ * @returns {void}
+ */
+export function applyClusterBlossomForce(node, parent, options = {}) {
+    if (!node || !parent || ["core", "tag", "kantor"].includes(node.type)) {
+        return;
+    }
+
+    const dx = node.x - parent.x;
+    const dy = node.y - parent.y;
+    const distance = Math.hypot(dx, dy) || 1;
+    const targetRadius = options.targetRadius ?? options.linkDistance ?? 80;
+    const radialError = targetRadius - distance;
+    const strength = options.strength ?? 0.018;
+    const radialForce = radialError * strength;
+
+    node.vx += (dx / distance) * radialForce;
+    node.vy += (dy / distance) * radialForce;
+}
+
+/**
  * Keeps a leaf node outside its parent relative to the graph origin.
  * @param {object} node Leaf graph node.
  * @param {object} parent Parent hub node.
@@ -241,23 +399,79 @@ export function applyMicroReheatImpulse(node, intensity = 2) {
 }
 
 /**
- * Moves a group and its children by the same drag delta.
+ * Builds directed dependency links from monitor parent relationships.
+ * @param {Array<object>} monitors Monitor records.
+ * @param {Array<object>} nodes Graph nodes.
+ * @param {number} targetDist Default spring distance.
+ * @returns {Array<object>} Dependency links.
+ */
+export function buildDependencyLinks(monitors, nodes, targetDist = 80) {
+    const nodeByMonitorId = new Map(nodes.map(node => [node.monitorId ?? node.id, node]));
+    return monitors.reduce((links, monitor) => {
+        const source = nodeByMonitorId.get(monitor.parent);
+        const target = nodeByMonitorId.get(monitor.id);
+        if (source && target && source !== target) {
+            links.push({ source, target, targetDist, isDependency: true });
+        }
+        return links;
+    }, []);
+}
+
+/**
+ * Moves a group and its children by the drag delta, either rigidly or with fluid physics momentum.
  * @param {object} group Group node being dragged.
  * @param {number} x New group x coordinate.
  * @param {number} y New group y coordinate.
  * @param {Array<object>} nodes All graph nodes.
+ * @param {object} options Movement options.
+ * @param {boolean} options.fluid Whether children follow via physics flow rather than rigid lock.
  * @returns {void}
  */
-export function dragGroupWithChildren(group, x, y, nodes) {
+export function dragGroupWithChildren(group, x, y, nodes, options = {}) {
     const dx = x - group.x;
     const dy = y - group.y;
     group.x = x;
     group.y = y;
+    if (group.anchorX !== undefined) {
+        group.anchorX += dx;
+        group.anchorY += dy;
+    }
+    group.vx = 0;
+    group.vy = 0;
+    const isFluid = options.fluid === true;
     nodes.forEach((node) => {
         if (node !== group && node.group === group.group && node.type !== "tag") {
-            node.x += dx;
-            node.y += dy;
+            if (node.anchorX !== undefined) {
+                node.anchorX += dx;
+                node.anchorY += dy;
+            }
+            if (isFluid) {
+                node.vx = (node.vx || 0) + dx * 0.35;
+                node.vy = (node.vy || 0) + dy * 0.35;
+            } else {
+                node.x += dx;
+                node.y += dy;
+                node.vx = 0;
+                node.vy = 0;
+            }
         }
+    });
+}
+
+/**
+ * Applies a small impulse to movable nodes to wake the physics simulation.
+ * @param {Array<object>} nodes Graph nodes.
+ * @param {number} intensity Force magnitude.
+ * @returns {void}
+ */
+export function reheatSimulationNodes(nodes, intensity = 2) {
+    nodes.forEach((node) => {
+        if (!node || node.type === "core" || node.type === "tag") {
+            return;
+        }
+        const randomForce = () => (Math.random() - 0.5) * intensity;
+        node.vx = (node.vx || 0) + randomForce();
+        node.vy = (node.vy || 0) + randomForce();
     });
 }
 
@@ -293,11 +507,13 @@ export function computeRadialLayout(groups, members, options = {}) {
             const count = members[group] || 0;
             const children = [];
             for (let i = 0; i < count; i++) {
-                const layer = count > 26 ? (i < 24 ? 0 : 1) : 0;
-                const layerIndex = layer === 0 ? i : i - 24;
-                const layerCount = layer === 0 ? Math.min(count, 24) : count - 24;
-                const childAngle = angle + layerIndex * Math.PI * 2 / layerCount;
-                const childRadius = leafOrbit + layer * 42;
+                const layer = count <= 22 ? 0 : count <= 58 ? (i < 22 ? 0 : 1) : (i < 22 ? 0 : i < 58 ? 1 : 2);
+                const layerStart = layer === 0 ? 0 : layer === 1 ? 22 : 58;
+                const layerCount = layer === 0 ? Math.min(count, 22) : layer === 1 ? Math.min(Math.max(count - 22, 0), 36) : count - 58;
+                const layerIndex = i - layerStart;
+                const layerOffset = layer % 2 ? Math.PI / Math.max(layerCount, 1) : 0;
+                const childAngle = angle + layerOffset + layerIndex * Math.PI * 2 / Math.max(layerCount, 1);
+                const childRadius = (count <= 22 ? leafOrbit : leafOrbit * 0.9) + layer * 34;
                 children.push({ x: x + Math.cos(childAngle) * childRadius, y: y + Math.sin(childAngle) * childRadius });
             }
             positions.set(group, { x, y, children });
