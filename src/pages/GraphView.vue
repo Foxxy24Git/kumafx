@@ -290,9 +290,10 @@ import {
     shouldTriggerMicroReheat,
     applyMicroReheatImpulse,
     reheatSimulationNodes,
+    collectHostTags,
 } from "../noc-graph-cluster";
 
-const PROVIDER_TAG_PATTERN = /^(icon\+?|la|telkom)$/i;
+const TAG_POSITION_STORAGE_KEY = "uptime-kuma-graph-tag-positions";
 
 export default {
     name: "NocGraphView",
@@ -326,6 +327,7 @@ export default {
 
             // Graph Data Structures
             nodes: [],
+            tagPositions: {},
             links: [],
             particles: [],
             liveTick: 0,
@@ -513,6 +515,11 @@ export default {
         this.updateClock();
         this.clockTimer = setInterval(this.updateClock, 1000);
 
+        try {
+            this.tagPositions = JSON.parse(localStorage.getItem(TAG_POSITION_STORAGE_KEY) || "{}");
+        } catch {
+            this.tagPositions = {};
+        }
         this.initCanvas();
         this.syncGraphData(true);
         this.startRenderLoop();
@@ -780,31 +787,23 @@ export default {
                     connectedCount: 0,
                 }));
             }
-            const providerTags = new Map();
-            visible.forEach(monitor => {
-                if (monitor.type === "GROUP") {
-                    return;
-                }
-                monitor.tags.forEach(name => {
-                    if (PROVIDER_TAG_PATTERN.test(name) && !providerTags.has(name)) {
-                        providerTags.set(name, monitor.tagColors[name]);
-                    }
-                });
-            });
-            Array.from(providerTags.keys()).forEach((name, index, all) => {
+            const hostTags = collectHostTags(visible);
+            Array.from(hostTags.keys()).forEach((name, index, all) => {
                 const existing = existingNodeMap.get(`TAG_${name}`);
+                const saved = this.tagPositions[name];
                 const angle = index * Math.PI * 2 / Math.max(all.length, 1);
                 nodes.push(markRaw({
                     id: `TAG_${name}`,
                     type: "TAG",
                     label: name,
-                    color: providerTags.get(name),
+                    color: hostTags.get(name),
                     status: "up",
                     radius: 9,
-                    x: existing?.x ?? Math.cos(angle) * 60,
-                    y: existing?.y ?? Math.sin(angle) * 60,
-                    vx: existing?.vx ?? 0,
-                    vy: existing?.vy ?? 0,
+                    fixed: true,
+                    x: existing?.x ?? saved?.x ?? Math.cos(angle) * 60,
+                    y: existing?.y ?? saved?.y ?? Math.sin(angle) * 60,
+                    vx: 0,
+                    vy: 0,
                     connectedCount: 0,
                 }));
             });
@@ -861,6 +860,8 @@ export default {
         },
 
         resetLayout() {
+            this.tagPositions = {};
+            localStorage.removeItem(TAG_POSITION_STORAGE_KEY);
             const count = Math.max(this.nodes.length, 1);
             this.nodes.forEach((node, index) => {
                 const angle = index * Math.PI * 2 / count;
@@ -951,7 +952,11 @@ export default {
                 return;
             }
 
-            if (this.isDragging && this.draggedNode && this.dragLastWorld) {
+            if (this.isDragging && this.draggedNode?.fixed && this.dragLastWorld) {
+                this.draggedNode.x = this.dragLastWorld.x;
+                this.draggedNode.y = this.dragLastWorld.y;
+                this.dragVelocity = { x: 0, y: 0 };
+            } else if (this.isDragging && this.draggedNode && this.dragLastWorld) {
                 const node = this.draggedNode;
                 const dx = (this.dragLastWorld.x - node.x) * 0.35;
                 const dy = (this.dragLastWorld.y - node.y) * 0.35;
@@ -971,7 +976,9 @@ export default {
             const dragged = this.isDragging ? this.draggedNode : null;
             links.forEach(link => {
                 if (link.isTagLink) {
-                    applyTagAttraction(link, { kSpring: 0.035 });
+                    if (!link.source.fixed) {
+                        applyTagAttraction(link, { kSpring: 0.035 });
+                    }
                 } else if (link.isDependency) {
                     applySpringForce(link, { kSpring: 0.035 });
                 }
@@ -988,7 +995,7 @@ export default {
                     node.vy = 0;
                     return;
                 }
-                if (node === this.draggedNode) {
+                if (node === this.draggedNode || node.fixed) {
                     node.vx = 0;
                     node.vy = 0;
                     return;
@@ -1376,7 +1383,14 @@ export default {
         },
 
         onMouseUp() {
-            if (this.isDragging && this.draggedNode) {
+            if (this.isDragging && this.draggedNode?.fixed) {
+                if (this.dragLastWorld) {
+                    this.draggedNode.x = this.dragLastWorld.x;
+                    this.draggedNode.y = this.dragLastWorld.y;
+                }
+                this.tagPositions[this.draggedNode.label] = { x: this.draggedNode.x, y: this.draggedNode.y };
+                localStorage.setItem(TAG_POSITION_STORAGE_KEY, JSON.stringify(this.tagPositions));
+            } else if (this.isDragging && this.draggedNode) {
                 this.draggedNode.vx = (this.dragVelocity?.x || 0) * 1.5;
                 this.draggedNode.vy = (this.dragVelocity?.y || 0) * 1.5;
             }
@@ -1389,7 +1403,14 @@ export default {
         },
 
         onMouseLeave() {
-            if (this.isDragging && this.draggedNode) {
+            if (this.isDragging && this.draggedNode?.fixed) {
+                if (this.dragLastWorld) {
+                    this.draggedNode.x = this.dragLastWorld.x;
+                    this.draggedNode.y = this.dragLastWorld.y;
+                }
+                this.tagPositions[this.draggedNode.label] = { x: this.draggedNode.x, y: this.draggedNode.y };
+                localStorage.setItem(TAG_POSITION_STORAGE_KEY, JSON.stringify(this.tagPositions));
+            } else if (this.isDragging && this.draggedNode) {
                 this.draggedNode.vx = (this.dragVelocity?.x || 0) * 1.5;
                 this.draggedNode.vy = (this.dragVelocity?.y || 0) * 1.5;
             }

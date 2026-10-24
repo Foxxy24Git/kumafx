@@ -18,7 +18,33 @@ const {
     applyTagAttraction,
     applyCollisionForce,
     applyLocalForces,
+    collectHostTags,
 } = require("../../src/noc-graph-cluster.js");
+
+describe("tag nodes", () => {
+    it("collects every tag attached to host monitors, not only provider tags", () => {
+        const monitors = [
+            { id: 1, type: "GROUP", tags: [ "GroupOnly" ], tagColors: { GroupOnly: "#000000" } },
+            { id: 2, type: "ATM", tags: [ "Telkom", "Jaringan Baru" ], tagColors: { Telkom: "#ff0000", "Jaringan Baru": "#00ff00" } },
+            { id: 3, type: "KANTOR", tags: [ "CAPEM", "Telkom" ], tagColors: { CAPEM: "#0000ff", Telkom: "#ff0000" } },
+        ];
+        const tags = collectHostTags(monitors);
+        assert.deepStrictEqual(Array.from(tags.keys()), [ "Telkom", "Jaringan Baru", "CAPEM" ]);
+        assert.strictEqual(tags.get("Jaringan Baru"), "#00ff00");
+        assert.ok(!tags.has("GroupOnly"));
+    });
+
+    it("never moves fixed nodes through local repulsion or collision", () => {
+        const tag = { x: 0, y: 0, vx: 0, vy: 0, radius: 9, fixed: true };
+        const host = { x: 3, y: 0, vx: 0, vy: 0, radius: 8 };
+        applyLocalForces([ tag, host ], { kRepel: 2200, cutoff: 160, minGap: 6 });
+        assert.strictEqual(tag.x, 0);
+        assert.strictEqual(tag.y, 0);
+        assert.strictEqual(tag.vx, 0);
+        assert.strictEqual(tag.vy, 0);
+        assert.ok(host.x > 3, `host should be pushed away: ${host.x}`);
+    });
+});
 
 describe("grid based local forces", () => {
     const makeNode = (x, y) => ({ x, y, vx: 0, vy: 0, radius: 8 });

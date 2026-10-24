@@ -109,6 +109,29 @@ export function applyClusterRepulsion(nodes, options = {}) {
 }
 
 /**
+ * Collects every tag attached to non-group monitors, keyed by tag name.
+ * @param {Array<object>} monitors Monitor records.
+ * @returns {Map<string, string>} Tag name to tag color.
+ */
+export function collectHostTags(monitors) {
+    const tags = new Map();
+    (monitors || []).forEach((monitor) => {
+        if (!monitor || String(monitor.type).toLowerCase() === "group") {
+            return;
+        }
+        (monitor.tags || []).forEach((tag) => {
+            const name = typeof tag === "string" ? tag : tag?.name;
+            if (!name || tags.has(name)) {
+                return;
+            }
+            const color = typeof tag === "string" ? monitor.tagColors?.[name] : tag.color;
+            tags.set(name, color || "#14b8a6");
+        });
+    });
+    return tags;
+}
+
+/**
  * Applies cutoff-based repulsion and collision using a spatial grid.
  * @param {Array<object>} nodes Graph nodes.
  * @param {object} options Physics parameters.
@@ -177,7 +200,7 @@ export function applyLocalForces(nodes, options = {}) {
                     const uy = dy / distance;
                     const fx = ux * force;
                     const fy = uy * force;
-                    if (node !== pinned) {
+                    if (node !== pinned && !node.fixed) {
                         node.vx -= fx * weight[i];
                         node.vy -= fy * weight[i];
                         if (overlap > 0) {
@@ -185,7 +208,7 @@ export function applyLocalForces(nodes, options = {}) {
                             node.y -= uy * overlap * 0.5;
                         }
                     }
-                    if (other !== pinned) {
+                    if (other !== pinned && !other.fixed) {
                         other.vx += fx * weight[j];
                         other.vy += fy * weight[j];
                         if (overlap > 0) {
