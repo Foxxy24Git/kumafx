@@ -14,6 +14,8 @@ const {
     dragGroupWithChildren,
     reheatSimulationNodes,
     buildDependencyLinks,
+    buildTopologyLinks,
+    applyTagAttraction,
     applyCollisionForce,
     applyLocalForces,
 } = require("../../src/noc-graph-cluster.js");
@@ -114,6 +116,52 @@ describe("monitor dependency graph", () => {
         assert.strictEqual(links[0].target.id, "MON_20");
         assert.strictEqual(links[1].source.id, "MON_20");
         assert.strictEqual(links[1].target.id, "MON_30");
+    });
+});
+
+describe("graph topology links", () => {
+    it("connects the core to every group and all 59 hosts to their own group", () => {
+        const monitors = [
+            { id: 1, type: "GROUP" },
+            { id: 2, type: "GROUP" },
+            ...Array.from({ length: 59 }, (_, index) => ({ id: index + 3, parent: 1, type: "ATM", tags: [] })),
+        ];
+        const nodes = [
+            { id: "CORE", type: "CORE" },
+            ...monitors.map(m => ({ id: `MON_${m.id}`, monitorId: m.id, type: m.type })),
+        ];
+        const links = buildTopologyLinks(monitors, nodes, 80);
+        assert.strictEqual(links.filter(l => l.source.id === "CORE").length, 2);
+        assert.strictEqual(links.filter(l => l.source.id === "MON_1" && l.target.type === "ATM").length, 59);
+    });
+
+    it("links each assigned provider tag directly to a host, including multiple tags", () => {
+        const monitors = [
+            { id: 1, type: "GROUP" },
+            { id: 2, parent: 1, type: "ATM", tags: ["ICON", "LA", "Telkom", "Other"] },
+            { id: 3, parent: 1, type: "ATM", tags: ["Telkom"] },
+        ];
+        const nodes = [
+            { id: "CORE", type: "CORE" },
+            ...monitors.map(m => ({ id: `MON_${m.id}`, monitorId: m.id, type: m.type })),
+            ...["ICON", "LA", "Telkom"].map(name => ({ id: `TAG_${name}`, type: "TAG", label: name })),
+        ];
+        const links = buildTopologyLinks(monitors, nodes, 80);
+        const tagLinks = links.filter(l => l.source.type === "TAG");
+        assert.deepStrictEqual(tagLinks.map(l => [l.source.label, l.target.monitorId]), [
+            ["ICON", 2], ["LA", 2], ["Telkom", 2], ["Telkom", 3],
+        ]);
+        assert.strictEqual(links.filter(l => l.source.id === "MON_1").length, 2);
+    });
+
+    it("pulls only the tag node toward its host so host layout is unchanged", () => {
+        const tag = { type: "TAG", x: 0, y: 0, vx: 0, vy: 0 };
+        const host = { type: "ATM", x: 200, y: 0, vx: 0, vy: 0 };
+        applyTagAttraction({ source: tag, target: host, targetDist: 80, memberCount: 4, isTagLink: true }, { kSpring: 0.04 });
+        assert.ok(Math.abs(tag.vx - 1.2) < 1e-10, `tag.vx=${tag.vx}`);
+        assert.strictEqual(tag.vy, 0);
+        assert.strictEqual(host.vx, 0);
+        assert.strictEqual(host.vy, 0);
     });
 });
 

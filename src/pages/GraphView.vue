@@ -282,7 +282,8 @@ import { UP, DOWN } from "../util.ts";
 import {
     getRepelWeight,
     applyLocalForces,
-    buildDependencyLinks,
+    buildTopologyLinks,
+    applyTagAttraction,
     applySpringForce,
     applyCenterGravity,
     collectStatusChangedNodes,
@@ -290,6 +291,8 @@ import {
     applyMicroReheatImpulse,
     reheatSimulationNodes,
 } from "../noc-graph-cluster";
+
+const PROVIDER_TAG_PATTERN = /^(icon\+?|la|telkom)$/i;
 
 export default {
     name: "NocGraphView",
@@ -393,7 +396,7 @@ export default {
         // Signature topology: hanya berubah jika monitor ditambah, dihapus,
         // diubah namanya, grupnya, atau tag-nya.
         topologySignature() {
-            return this.allMonitors.map(m => `${m.id}:${m.name}:${m.parent}:${m.group}:${m.type}:${m.tag}`).join("|");
+            return this.allMonitors.map(m => `${m.id}:${m.name}:${m.parent}:${m.group}:${m.type}:${m.tags.join(",")}`).join("|");
         },
 
         availableGroups() {
@@ -762,7 +765,61 @@ export default {
                     connectedCount: 0,
                 });
             });
-            const links = buildDependencyLinks(visible, nodes, this.linkDistance).map(link => markRaw(link));
+            if (nodes.length) {
+                const existingCore = existingNodeMap.get("CORE");
+                nodes.unshift(markRaw({
+                    id: "CORE",
+                    type: "CORE",
+                    label: "CORE",
+                    status: "up",
+                    radius: 14,
+                    x: existingCore?.x ?? 0,
+                    y: existingCore?.y ?? 0,
+                    vx: 0,
+                    vy: 0,
+                    connectedCount: 0,
+                }));
+            }
+            const providerTags = new Map();
+            visible.forEach(monitor => {
+                if (monitor.type === "GROUP") {
+                    return;
+                }
+                monitor.tags.forEach(name => {
+                    if (PROVIDER_TAG_PATTERN.test(name) && !providerTags.has(name)) {
+                        providerTags.set(name, monitor.tagColors[name]);
+                    }
+                });
+            });
+            Array.from(providerTags.keys()).forEach((name, index, all) => {
+                const existing = existingNodeMap.get(`TAG_${name}`);
+                const angle = index * Math.PI * 2 / Math.max(all.length, 1);
+                nodes.push(markRaw({
+                    id: `TAG_${name}`,
+                    type: "TAG",
+                    label: name,
+                    color: providerTags.get(name),
+                    status: "up",
+                    radius: 9,
+                    x: existing?.x ?? Math.cos(angle) * 60,
+                    y: existing?.y ?? Math.sin(angle) * 60,
+                    vx: existing?.vx ?? 0,
+                    vy: existing?.vy ?? 0,
+                    connectedCount: 0,
+                }));
+            });
+            const links = buildTopologyLinks(visible, nodes, this.linkDistance).map(link => markRaw(link));
+            const tagMemberCount = new Map();
+            links.forEach(link => {
+                if (link.isTagLink) {
+                    tagMemberCount.set(link.source, (tagMemberCount.get(link.source) || 0) + 1);
+                }
+            });
+            links.forEach(link => {
+                if (link.isTagLink) {
+                    link.memberCount = tagMemberCount.get(link.source);
+                }
+            });
             links.forEach(link => {
                 link.source.connectedCount++;
                 link.target.connectedCount++;
@@ -912,12 +969,25 @@ export default {
                 node.vy = node.vy || 0;
             });
             const dragged = this.isDragging ? this.draggedNode : null;
-            links.forEach(link => applySpringForce(link, { kSpring: 0.035 }));
+            links.forEach(link => {
+                if (link.isTagLink) {
+                    applyTagAttraction(link, { kSpring: 0.035 });
+                } else if (link.isDependency) {
+                    applySpringForce(link, { kSpring: 0.035 });
+                }
+            });
             applyCenterGravity(nodes, 0.003);
             applyLocalForces(nodes, { kRepel: 2200, cutoff: 160, minGap: 6, pinned: dragged });
 
             let maxMovement = 0;
             nodes.forEach((node) => {
+                if (node.type === "CORE") {
+                    node.x = 0;
+                    node.y = 0;
+                    node.vx = 0;
+                    node.vy = 0;
+                    return;
+                }
                 if (node === this.draggedNode) {
                     node.vx = 0;
                     node.vy = 0;
@@ -1017,7 +1087,11 @@ export default {
                 ctx.moveTo(src.x, src.y);
                 ctx.lineTo(tgt.x, tgt.y);
 
-                if (tgt.type === "BACKUP" && tgt.status !== "down") {
+                if (link.isTagLink) {
+                    ctx.setLineDash([2, 4]);
+                    ctx.strokeStyle = this.rgbaFromHex(src.color, alpha);
+                    ctx.lineWidth = isConnected ? 1.6 : 0.7;
+                } else if (tgt.type === "BACKUP" && tgt.status !== "down") {
                     ctx.setLineDash([4, 4]);
                     ctx.strokeStyle = `rgba(245, 158, 11, ${alpha})`;
                     ctx.lineWidth = isConnected ? 2 : 1;
@@ -1102,7 +1176,19 @@ export default {
                 ctx.beginPath();
                 ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
 
-                if (node.type === "GROUP") {
+                if (node.type === "CORE") {
+                    ctx.fillStyle = "#0f172a";
+                    ctx.fill();
+                    ctx.strokeStyle = "#e2e8f0";
+                    ctx.lineWidth = 2.5;
+                    ctx.stroke();
+                } else if (node.type === "TAG") {
+                    ctx.fillStyle = this.rgbaFromHex(node.color, 0.9);
+                    ctx.fill();
+                    ctx.strokeStyle = "#e2e8f0";
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                } else if (node.type === "GROUP") {
                     ctx.fillStyle = node.status === "down" ? "#ef4444" : "#0284c7";
                     ctx.fill();
                     ctx.strokeStyle = "#38bdf8";
@@ -1145,6 +1231,8 @@ export default {
                 let shouldDrawLabel = false;
                 if (this.alwaysShowLabels || isHovered || matchesSearch) {
                     shouldDrawLabel = true;
+                } else if (node.type === "CORE" || node.type === "TAG") {
+                    shouldDrawLabel = this.camera.scale >= 0.5;
                 } else if (node.type === "GROUP") {
                     shouldDrawLabel = this.camera.scale >= 0.7;
                 } else if (node.type === "KANTOR") {

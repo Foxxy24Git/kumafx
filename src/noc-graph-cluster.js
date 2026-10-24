@@ -311,6 +311,26 @@ export function applyOfflineOutwardForce(node, parent, options = {}) {
 }
 
 /**
+ * Pulls a provider tag node toward its hosts without moving the hosts.
+ * @param {object} link Tag-to-host edge.
+ * @param {object} options Physics parameter options.
+ * @returns {void}
+ */
+export function applyTagAttraction(link, options = {}) {
+    if (!link || !link.isTagLink) {
+        return;
+    }
+    const dx = link.target.x - link.source.x;
+    const dy = link.target.y - link.source.y;
+    const distance = Math.hypot(dx, dy) || 1;
+    const memberCount = link.memberCount || 0;
+    const scale = memberCount > 1 ? 1 / memberCount : 1;
+    const force = (distance - (link.targetDist ?? options.targetDist ?? 80)) * (options.kSpring ?? 0.035) * scale;
+    link.source.vx += (dx / distance) * force;
+    link.source.vy += (dy / distance) * force;
+}
+
+/**
  * Applies Hooke's spring attraction along an edge.
  * @param {object} link Graph edge.
  * @param {object} options Physics parameter options.
@@ -415,6 +435,48 @@ export function buildDependencyLinks(monitors, nodes, targetDist = 80) {
         }
         return links;
     }, []);
+}
+
+/**
+ * Builds core, dependency, and provider-tag links for the topology graph.
+ * @param {Array<object>} monitors Monitor records.
+ * @param {Array<object>} nodes Graph nodes.
+ * @param {number} targetDist Default spring distance.
+ * @returns {Array<object>} Topology links.
+ */
+export function buildTopologyLinks(monitors, nodes, targetDist = 80) {
+    const links = buildDependencyLinks(monitors, nodes, targetDist);
+    const core = nodes.find(node => String(node.type).toLowerCase() === "core");
+    const nodeByMonitorId = new Map(nodes.map(node => [node.monitorId ?? node.id, node]));
+    const groups = monitors.filter(monitor => String(monitor.type).toLowerCase() === "group");
+    const tagNodes = new Map(nodes
+        .filter(node => String(node.type).toLowerCase() === "tag")
+        .map(node => [node.label, node]));
+
+    if (core) {
+        groups.forEach(group => {
+            const target = nodeByMonitorId.get(group.id);
+            if (target) {
+                links.push({ source: core, target, targetDist, isCoreLink: true });
+            }
+        });
+    }
+
+    monitors.forEach(monitor => {
+        const target = nodeByMonitorId.get(monitor.id);
+        if (!target || String(monitor.type).toLowerCase() === "group") {
+            return;
+        }
+        (monitor.tags || []).forEach(tag => {
+            const tagName = typeof tag === "string" ? tag : tag.name;
+            const source = tagNodes.get(tagName);
+            if (source) {
+                links.push({ source, target, targetDist, isTagLink: true });
+            }
+        });
+    });
+
+    return links;
 }
 
 /**
