@@ -13,7 +13,7 @@
         </div>
 
         <!-- Desktop header -->
-        <header v-if="!$root.isMobile && $route.name !== 'GraphView'" class="d-flex flex-wrap justify-content-center py-3 mb-3 border-bottom">
+        <header v-if="!$root.isMobile" class="d-flex flex-wrap justify-content-center py-3 mb-3 border-bottom">
             <router-link
                 to="/dashboard"
                 class="d-flex align-items-center mb-3 mb-md-0 me-md-auto text-dark text-decoration-none"
@@ -124,7 +124,7 @@
         </header>
 
         <!-- Mobile header -->
-        <header v-else-if="$route.name !== 'GraphView'" class="d-flex flex-wrap justify-content-center pt-2 pb-2 mb-3">
+        <header v-else class="d-flex flex-wrap justify-content-center pt-2 pb-2 mb-3">
             <router-link to="/dashboard" class="d-flex align-items-center text-dark text-decoration-none">
                 <object class="bi" width="40" height="40" data="/icon.svg" />
                 <span class="fs-4 title ms-2">Uptime Kuma</span>
@@ -196,6 +196,7 @@ export default {
             const classes = {};
             classes[this.$root.theme] = true;
             classes["mobile"] = this.$root.isMobile;
+            classes["noc-graph-layout"] = this.$route.name === "GraphView";
             return classes;
         },
 
@@ -308,9 +309,22 @@ main {
     min-height: calc(100vh - 160px);
 
     &.noc-fullscreen-main {
-        min-height: 100vh;
+        flex: 1;
+        min-height: 0;
         padding: 0;
         margin: 0;
+    }
+}
+
+.noc-graph-layout {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    > header {
+        flex-shrink: 0;
+        margin-bottom: 0 !important;
     }
 }
 

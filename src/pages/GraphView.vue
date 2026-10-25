@@ -1,81 +1,56 @@
 <template>
     <div ref="container" class="noc-graph-page">
-        <!-- TOP TOOLBAR & HEADER -->
-        <div class="noc-graph-header d-flex flex-wrap align-items-center justify-content-between gap-3">
-            <div class="d-flex align-items-center gap-3">
-                <div class="noc-logo-badge">
-                    <font-awesome-icon icon="project-diagram" class="noc-header-icon" />
-                </div>
-                <div>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="noc-title">TOPOLOGI JARINGAN GRAPH VIEW</span>
-                        <span class="noc-badge-obsidian">Obsidian View • 60 FPS</span>
-                    </div>
-                    <p class="noc-subtitle mb-0">Visualisasi Realtime Dependensi Monitor (Parent → Child)</p>
-                </div>
-            </div>
-
-            <!-- Top Nav & Actions -->
-            <div class="d-flex align-items-center gap-2">
-                <router-link to="/dashboard" class="btn btn-sm noc-btn-secondary d-flex align-items-center gap-2" title="Dashboard Utama">
-                    <font-awesome-icon icon="tachometer-alt" />
-                    <span class="small">Dashboard Utama</span>
-                </router-link>
-
-                <div class="noc-clock-box d-none d-sm-flex align-items-center gap-2">
-                    <span class="noc-dot-live"></span>
-                    <span class="noc-mono-text font-bold">{{ currentTime }}</span>
-                </div>
-
-                <button class="btn btn-sm noc-btn-secondary" title="Fullscreen" @click="toggleFullScreen">
-                    <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0 0l-5-5m-7 11l-5 5m0 0h4m-4 0v-4m16 4l-5-5m5 5v-4m0 4h-4" />
-                    </svg>
-                </button>
-            </div>
-        </div>
-
         <!-- CANVAS MAIN AREA -->
         <div class="noc-canvas-wrapper" @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp" @wheel="onWheel" @mouseleave="onMouseLeave">
             <canvas ref="canvas" class="noc-graph-canvas"></canvas>
 
-            <!-- FLOATING CONTROL PANEL (OBSIDIAN STYLE) -->
-            <div class="noc-floating-panel" :class="{ 'panel-collapsed': isPanelCollapsed }">
+            <!-- FLOATING CONTROL PANEL (KUMA STYLE) -->
+            <div class="noc-floating-panel shadow-box" :class="{ 'panel-collapsed': isPanelCollapsed }" @wheel.stop>
                 <div
-                    class="d-flex align-items-center justify-content-between p-2 px-3 cursor-pointer user-select-none"
-                    :class="{ 'border-bottom border-secondary-subtle': !isPanelCollapsed }"
+                    class="noc-panel-header d-flex align-items-center justify-content-between cursor-pointer user-select-none"
                     @click="isPanelCollapsed = !isPanelCollapsed"
                 >
                     <div class="d-flex align-items-center gap-2">
-                        <span class="noc-dot-blue"></span>
-                        <span class="fw-bold small text-light font-mono text-nowrap">KONTROL TOPOLOGI</span>
+                        <font-awesome-icon icon="filter" class="text-primary" />
+                        <span class="noc-panel-title">Kontrol Topologi</span>
                     </div>
-                    <button
-                        type="button"
-                        class="btn btn-sm btn-link text-secondary text-decoration-none p-0 noc-panel-toggle ms-2"
-                        @click.stop="isPanelCollapsed = !isPanelCollapsed"
-                    >
-                        <span v-if="isPanelCollapsed" class="text-primary fw-semibold">Buka ▾</span>
-                        <span v-else>Tutup ▴</span>
-                    </button>
+                    <div class="d-flex align-items-center gap-2 ms-2">
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-link text-decoration-none p-0 noc-panel-fullscreen"
+                            :title="isFullscreen ? 'Keluar Full Screen' : 'Full Screen'"
+                            :aria-label="isFullscreen ? 'Keluar Full Screen' : 'Full Screen'"
+                            @click.stop="toggleFullscreen"
+                        >
+                            <span aria-hidden="true">{{ isFullscreen ? '×' : '□' }}</span>
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-link text-decoration-none p-0 noc-panel-toggle"
+                            @click.stop="isPanelCollapsed = !isPanelCollapsed"
+                        >
+                            <span v-if="isPanelCollapsed" class="text-primary fw-semibold">Buka ▾</span>
+                            <span v-else class="text-secondary">Tutup ▴</span>
+                        </button>
+                    </div>
                 </div>
 
-                <div v-if="!isPanelCollapsed" class="p-3 d-flex flex-column gap-3 noc-panel-content">
+                <div v-if="!isPanelCollapsed" class="noc-panel-content d-flex flex-column gap-3">
                     <!-- Search Input -->
                     <div>
-                        <label class="text-secondary small fw-semibold mb-1 d-block">Cari Perangkat / Wilayah:</label>
+                        <label class="form-label small fw-bold mb-1">Cari Perangkat / Wilayah:</label>
                         <div class="input-group input-group-sm">
-                            <span class="input-group-text bg-dark border-secondary text-secondary">
+                            <span class="input-group-text">
                                 <font-awesome-icon icon="search" />
                             </span>
                             <input
                                 v-model="searchQuery"
                                 type="text"
-                                class="form-control form-control-sm bg-dark text-light border-secondary font-mono"
+                                class="form-control"
                                 placeholder="Ketik ATM-..., KC-..., atau IP..."
                                 @keyup.enter="focusSearchedNode"
                             />
-                            <button v-if="searchQuery" class="btn btn-sm btn-outline-secondary" @click="searchQuery = ''">
+                            <button v-if="searchQuery" class="btn btn-outline-secondary" type="button" @click="searchQuery = ''">
                                 &times;
                             </button>
                         </div>
@@ -86,8 +61,8 @@
 
                     <!-- Filter Grup Wilayah -->
                     <div>
-                        <label class="text-secondary small fw-semibold mb-1 d-block">Grup Wilayah / Cabang:</label>
-                        <select v-model="selectedGroup" class="form-select form-select-sm bg-dark text-light border-secondary">
+                        <label class="form-label small fw-bold mb-1">Grup Wilayah / Cabang:</label>
+                        <select v-model="selectedGroup" class="form-select form-select-sm">
                             <option value="ALL">Semua Wilayah ({{ availableGroups.length }} Grup)</option>
                             <option v-for="g in availableGroups" :key="g" :value="g">{{ g }}</option>
                         </select>
@@ -95,12 +70,12 @@
 
                     <!-- Filter Status -->
                     <div>
-                        <label class="text-secondary small fw-semibold mb-1 d-block">Filter Status:</label>
-                        <div class="btn-group btn-group-sm w-100" role="group">
+                        <label class="form-label small fw-bold mb-1">Filter Status:</label>
+                        <div class="btn-group btn-group-sm w-100 noc-status-btn-group" role="group">
                             <button
                                 type="button"
                                 class="btn"
-                                :class="statusFilter === 'ALL' ? 'btn-primary' : 'btn-outline-secondary'"
+                                :class="statusFilter === 'ALL' ? 'btn-primary active' : 'btn-outline-normal'"
                                 @click="statusFilter = 'ALL'"
                             >
                                 Semua
@@ -108,7 +83,7 @@
                             <button
                                 type="button"
                                 class="btn"
-                                :class="statusFilter === 'UP' ? 'btn-success' : 'btn-outline-secondary'"
+                                :class="statusFilter === 'UP' ? 'btn-primary active' : 'btn-outline-normal'"
                                 @click="statusFilter = 'UP'"
                             >
                                 UP ({{ stats.up }})
@@ -116,7 +91,7 @@
                             <button
                                 type="button"
                                 class="btn"
-                                :class="statusFilter === 'DOWN' ? 'btn-danger' : 'btn-outline-secondary'"
+                                :class="statusFilter === 'DOWN' ? 'btn-danger active' : 'btn-outline-normal'"
                                 @click="statusFilter = 'DOWN'"
                             >
                                 DOWN ({{ stats.down }})
@@ -126,45 +101,45 @@
 
                     <!-- Filter Tipe Node -->
                     <div>
-                        <label class="text-secondary small fw-semibold mb-1 d-block">Tipe Node Tampil:</label>
-                        <div class="d-flex flex-wrap gap-2 small">
-                            <label class="d-flex align-items-center gap-1 cursor-pointer">
-                                <input v-model="showGroups" type="checkbox" class="form-check-input" />
+                        <label class="form-label small fw-bold mb-1">Tipe Node Tampil:</label>
+                        <div class="d-flex flex-wrap gap-3 small">
+                            <label class="form-check d-flex align-items-center gap-1 cursor-pointer mb-0">
+                                <input v-model="showGroups" type="checkbox" class="form-check-input mt-0" />
                                 <span>Grup</span>
                             </label>
-                            <label class="d-flex align-items-center gap-1 cursor-pointer">
-                                <input v-model="showAtm" type="checkbox" class="form-check-input" />
+                            <label class="form-check d-flex align-items-center gap-1 cursor-pointer mb-0">
+                                <input v-model="showAtm" type="checkbox" class="form-check-input mt-0" />
                                 <span>ATM</span>
                             </label>
-                            <label class="d-flex align-items-center gap-1 cursor-pointer">
-                                <input v-model="showKantor" type="checkbox" class="form-check-input" />
+                            <label class="form-check d-flex align-items-center gap-1 cursor-pointer mb-0">
+                                <input v-model="showKantor" type="checkbox" class="form-check-input mt-0" />
                                 <span>Kantor</span>
                             </label>
-                            <label class="d-flex align-items-center gap-1 cursor-pointer">
-                                <input v-model="showBackup" type="checkbox" class="form-check-input" />
+                            <label class="form-check d-flex align-items-center gap-1 cursor-pointer mb-0">
+                                <input v-model="showBackup" type="checkbox" class="form-check-input mt-0" />
                                 <span>Backup</span>
                             </label>
                         </div>
                     </div>
 
                     <!-- Physics & Animation Toggles -->
-                    <div class="border-top border-secondary-subtle pt-2">
+                    <div class="noc-section-divider pt-2">
                         <div class="d-flex align-items-center justify-content-between mb-2">
-                            <span class="text-secondary small">Animasi Partikel Flow:</span>
+                            <span class="small">Animasi Partikel Flow:</span>
                             <div class="form-check form-switch mb-0">
                                 <input v-model="enableParticles" class="form-check-input" type="checkbox" />
                             </div>
                         </div>
 
                         <div class="d-flex align-items-center justify-content-between mb-2">
-                            <span class="text-secondary small">Tampilkan Semua Label:</span>
+                            <span class="small">Tampilkan Semua Label:</span>
                             <div class="form-check form-switch mb-0">
                                 <input v-model="alwaysShowLabels" class="form-check-input" type="checkbox" />
                             </div>
                         </div>
 
                         <div class="d-flex align-items-center justify-content-between mb-2">
-                            <span class="text-secondary small">Simulasi Fisika Aktif:</span>
+                            <span class="small">Simulasi Fisika Aktif:</span>
                             <div class="form-check form-switch mb-0">
                                 <input v-model="isPhysicsActive" class="form-check-input" type="checkbox" />
                             </div>
@@ -172,32 +147,32 @@
 
                         <div class="noc-physics-status small font-mono mb-2" :class="physicsStatusClass">
                             <div class="d-flex align-items-center justify-content-between">
-                                <span>MODE FISIKA</span>
-                                <span class="fw-bold">{{ physicsModeLabel }}</span>
+                                <span class="text-secondary">MODE FISIKA</span>
+                                <span class="fw-bold text-primary">{{ physicsModeLabel }}</span>
                             </div>
                             <div class="mt-1 text-secondary">
                                 {{ physicsStatusDetail }}
                             </div>
                             <div class="d-flex align-items-center gap-2 mt-2 pt-2 border-top border-secondary-subtle" aria-label="Monitoring heartbeat realtime aktif">
                                 <span class="noc-live-heartbeat-dot" aria-hidden="true"></span>
-                                <span class="fw-bold text-success">LIVE HEARTBEAT</span>
+                                <span class="fw-bold text-primary">LIVE HEARTBEAT</span>
                             </div>
                         </div>
 
                         <div class="mt-2">
                             <div class="d-flex justify-content-between text-secondary small">
                                 <span>Jarak Pegas Link:</span>
-                                <span class="font-mono">{{ linkDistance }}px</span>
+                                <span class="font-mono text-primary">{{ linkDistance }}px</span>
                             </div>
                             <input v-model.number="linkDistance" type="range" class="form-range" min="30" max="180" step="5" />
                         </div>
                     </div>
 
-                    <div class="d-flex gap-2 border-top border-secondary-subtle pt-2">
-                        <button type="button" class="btn btn-sm btn-outline-secondary w-50" title="Reset Posisi Kamera" @click="resetCamera">
+                    <div class="d-flex gap-2 noc-section-divider pt-2">
+                        <button type="button" class="btn btn-sm btn-outline-normal w-50" title="Reset Posisi Kamera" @click="resetCamera">
                             Reset View
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-primary w-50" title="Susun Ulang Posisi Node" @click="resetLayout">
+                        <button type="button" class="btn btn-sm btn-primary w-50" title="Susun Ulang Posisi Node" @click="resetLayout">
                             Reset Layout
                         </button>
                     </div>
@@ -276,7 +251,6 @@
 </template>
 
 <script>
-import dayjs from "dayjs";
 import { markRaw } from "vue";
 import { UP, DOWN } from "../util.ts";
 import {
@@ -300,11 +274,10 @@ export default {
     name: "NocGraphView",
     data() {
         return {
-            currentTime: "",
-            clockTimer: null,
 
             // UI Controls
             isPanelCollapsed: false,
+            isFullscreen: false,
             searchQuery: "",
             selectedGroup: "ALL",
             statusFilter: "ALL",
@@ -513,9 +486,6 @@ export default {
         },
     },
     mounted() {
-        this.updateClock();
-        this.clockTimer = setInterval(this.updateClock, 1000);
-
         try {
             this.tagPositions = JSON.parse(localStorage.getItem(TAG_POSITION_STORAGE_KEY) || "{}");
         } catch {
@@ -530,6 +500,8 @@ export default {
         this.$watch(() => this.$root.lastHeartbeatList, this.scheduleLiveSync);
 
         window.addEventListener("resize", this.handleResize);
+        document.addEventListener("fullscreenchange", this.onFullscreenChange);
+        document.addEventListener("webkitfullscreenchange", this.onFullscreenChange);
         if (typeof ResizeObserver !== "undefined" && this.$refs.canvas) {
             this.resizeObserver = new ResizeObserver(() => {
                 this.handleResize();
@@ -538,9 +510,6 @@ export default {
         }
     },
     beforeUnmount() {
-        if (this.clockTimer) {
-            clearInterval(this.clockTimer);
-        }
         if (this.liveSyncTimer) {
             clearTimeout(this.liveSyncTimer);
         }
@@ -551,10 +520,51 @@ export default {
             this.resizeObserver.disconnect();
         }
         window.removeEventListener("resize", this.handleResize);
+        document.removeEventListener("fullscreenchange", this.onFullscreenChange);
+        document.removeEventListener("webkitfullscreenchange", this.onFullscreenChange);
+        if (this.getFullscreenElement() === this.$refs.container) {
+            this.exitFullscreen();
+        }
     },
     methods: {
-        updateClock() {
-            this.currentTime = dayjs().format("HH:mm:ss") + " WIB";
+        getFullscreenElement() {
+            return document.fullscreenElement || document.webkitFullscreenElement || null;
+        },
+
+        async toggleFullscreen() {
+            if (this.getFullscreenElement()) {
+                await this.exitFullscreen();
+                return;
+            }
+            const el = this.$refs.container;
+            if (!el) {
+                return;
+            }
+            try {
+                if (el.requestFullscreen) {
+                    await el.requestFullscreen();
+                } else if (el.webkitRequestFullscreen) {
+                    el.webkitRequestFullscreen();
+                }
+            } catch (err) {
+                console.warn("Gagal masuk full screen:", err);
+            }
+        },
+
+        async exitFullscreen() {
+            try {
+                if (document.exitFullscreen) {
+                    await document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
+            } catch (err) {
+                console.warn("Gagal keluar full screen:", err);
+            }
+        },
+
+        onFullscreenChange() {
+            this.isFullscreen = this.getFullscreenElement() === this.$refs.container;
         },
 
         getDummyMonitors() {
@@ -1455,14 +1465,6 @@ export default {
             }
         },
 
-        toggleFullScreen() {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(() => {});
-            } else if (document.exitFullscreen) {
-                document.exitFullscreen();
-            }
-        },
-
         rgbaFromHex(hex, alpha) {
             const normalized = String(hex || "#14b8a6").replace("#", "");
             const value = normalized.length === 3
@@ -1505,8 +1507,7 @@ export default {
 </script>
 
 <style scoped>
-.font-mono,
-.noc-mono-text {
+.font-mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -1530,7 +1531,7 @@ export default {
     background-color: #080c14;
     color: #e2e8f0;
     width: 100%;
-    height: 100vh;
+    height: 100%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1539,102 +1540,12 @@ export default {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-/* TOP HEADER */
-.noc-graph-header {
-    background: #0f172a;
-    border-bottom: 1px solid #1e293b;
-    padding: 0.75rem 1.25rem;
-    z-index: 20;
-}
-
-.noc-logo-badge {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #ffffff;
-    box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
-}
-
-.noc-header-icon {
-    font-size: 16px;
-}
-
-.noc-title {
-    font-size: 1.1rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    color: #ffffff;
-}
-
-.noc-subtitle {
-    font-size: 0.75rem;
-    color: #94a3b8;
-}
-
-.noc-badge-obsidian {
-    background: #1e293b;
-    color: #a855f7;
-    border: 1px solid #475569;
-    font-size: 0.68rem;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    font-family: monospace;
-}
-
-.noc-btn-secondary {
-    background-color: #1e293b;
-    border: 1px solid #334155;
-    color: #cbd5e1;
-    transition: all 0.15s ease;
-}
-
-.noc-btn-secondary:hover {
-    background-color: #334155;
-    color: #ffffff;
-}
-
-.noc-clock-box {
-    background: #0b0f19;
-    border: 1px solid #334155;
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-size: 0.8rem;
-}
-
-.noc-dot-live {
-    width: 7px;
-    height: 7px;
-    background-color: #22c55e;
-    border-radius: 50%;
-    box-shadow: 0 0 8px #22c55e;
-    animation: noc-pulse 1.8s infinite;
-}
-
 .noc-dot-blue {
     width: 8px;
     height: 8px;
     background-color: #38bdf8;
     border-radius: 50%;
     box-shadow: 0 0 6px #38bdf8;
-}
-
-@keyframes noc-pulse {
-    0%,
-    100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-
-    50% {
-        opacity: 0.4;
-        transform: scale(0.9);
-    }
 }
 
 /* CANVAS WRAPPER */
@@ -1657,38 +1568,151 @@ export default {
     display: block;
 }
 
-/* FLOATING CONTROLS (OBSIDIAN STYLE) */
+/* FLOATING CONTROLS (KUMA STYLE) */
 .noc-floating-panel {
     position: absolute;
     top: 16px;
     right: 16px;
     width: 320px;
-    max-height: calc(100vh - 120px);
-    background: rgba(15, 23, 42, 0.88);
-    backdrop-filter: blur(12px);
-    border: 1px solid #334155;
+    max-width: calc(100% - 32px);
+    max-height: calc(100% - 32px);
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    background-color: #0d1117;
+    color: #b1b8c0;
+    border: 1px solid #1d2634;
     border-radius: 10px;
     z-index: 10;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-    transition: all 0.25s ease;
+    box-shadow: 0 15px 70px rgba(0, 0, 0, 0.5);
+    transition: width 0.2s ease;
     overflow: hidden;
 }
 
 .panel-collapsed {
-    width: 220px;
-    max-height: 48px;
-    overflow: hidden;
+    width: 230px;
+}
+
+.noc-panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #1d2634;
+}
+
+.panel-collapsed .noc-panel-header {
+    border-bottom: 0;
+}
+
+.noc-panel-title {
+    font-weight: bold;
+    color: #f0f6fc;
+    white-space: nowrap;
+}
+
+.noc-panel-fullscreen {
+    min-width: 20px;
+    line-height: 1.2;
+    color: #b1b8c0;
+}
+
+.noc-panel-fullscreen:hover,
+.noc-panel-fullscreen:focus-visible {
+    color: #5cdd8b;
 }
 
 .noc-panel-toggle {
     min-width: 42px;
+    padding: 0;
     line-height: 1.2;
 }
 
+.noc-section-divider {
+    border-top: 1px solid #1d2634;
+}
+
+.noc-floating-panel .form-label {
+    color: #b1b8c0;
+}
+
+.noc-floating-panel .form-control,
+.noc-floating-panel .form-select {
+    color: #b1b8c0;
+    background-color: #070a10;
+    border-color: #1d2634;
+}
+
+.noc-floating-panel .form-control::placeholder {
+    color: #6c757d;
+}
+
+.noc-floating-panel .form-control:focus,
+.noc-floating-panel .form-select:focus {
+    border-color: #5cdd8b;
+    box-shadow: 0 0 0 0.2rem rgba(92, 221, 139, 0.25);
+}
+
+.noc-floating-panel .input-group-text {
+    color: #b1b8c0;
+    background-color: #282f39;
+    border-color: #1d2634;
+}
+
+.noc-status-btn-group .btn {
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.noc-floating-panel .btn-outline-normal {
+    color: #b1b8c0;
+    border-color: #1d2634;
+}
+
+.noc-floating-panel .btn-outline-normal:hover {
+    color: #f0f6fc;
+    background-color: #161b22;
+}
+
+.noc-floating-panel .btn-primary {
+    color: #020b05;
+}
+
+.noc-floating-panel .form-check-input {
+    background-color: #070a10;
+    border-color: #1d2634;
+}
+
+.noc-floating-panel .form-switch .form-check-input:not(:checked) {
+    background-color: #232f3b;
+}
+
+.noc-floating-panel .form-check-input:checked {
+    background-color: #5cdd8b;
+    border-color: #5cdd8b;
+}
+
+.noc-floating-panel .form-check-input:focus {
+    box-shadow: 0 0 0 0.2rem rgba(92, 221, 139, 0.25);
+}
+
+.noc-floating-panel .form-range::-webkit-slider-thumb {
+    background-color: #5cdd8b;
+}
+
+.noc-floating-panel .form-range::-moz-range-thumb {
+    background-color: #5cdd8b;
+}
+
+.noc-floating-panel .form-range::-webkit-slider-runnable-track {
+    background-color: #232f3b;
+}
+
+.noc-floating-panel .form-range::-moz-range-track {
+    background-color: #232f3b;
+}
+
 .noc-physics-status {
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 6px;
+    background-color: #070a10;
+    border: 1px solid #1d2634;
+    border-radius: 10px;
     padding: 8px 10px;
     font-size: 11px;
 }
@@ -1698,8 +1722,8 @@ export default {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background-color: #22c55e;
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+    background-color: #5cdd8b;
+    box-shadow: 0 0 6px rgba(92, 221, 139, 0.6);
     animation: noc-heartbeat-pulse 1.6s infinite ease-in-out;
 }
 
@@ -1724,7 +1748,11 @@ export default {
 
 .noc-panel-content {
     overflow-y: auto;
+    flex: 1;
+    min-height: 0;
     max-height: calc(100vh - 170px);
+    padding: 1rem;
+    overscroll-behavior: contain;
 }
 
 /* FLOATING LEGEND (BOTTOM BAR) */
