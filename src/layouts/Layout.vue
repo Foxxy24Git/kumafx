@@ -51,6 +51,12 @@
                         {{ $t("Network Graph") }}
                     </router-link>
                 </li>
+                <li v-if="$root.loggedIn" class="nav-item me-2">
+                    <router-link to="/noc-dashboard" class="nav-link">
+                        <font-awesome-icon icon="tachometer-alt" />
+                        NOC Dashboard
+                    </router-link>
+                </li>
                 <li v-if="$root.loggedIn" class="nav-item">
                     <div class="dropdown dropdown-profile-pic">
                         <div class="nav-link" data-bs-toggle="dropdown">
@@ -196,7 +202,7 @@ export default {
             const classes = {};
             classes[this.$root.theme] = true;
             classes["mobile"] = this.$root.isMobile;
-            classes["noc-graph-layout"] = this.$route.name === "GraphView";
+            classes["noc-graph-layout"] = this.$route.name === "GraphView" || this.$route.name === "NocDashboard";
             return classes;
         },
 

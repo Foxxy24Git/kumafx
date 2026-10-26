@@ -10,6 +10,7 @@ import EditMaintenance from "./pages/EditMaintenance.vue";
 import List from "./pages/List.vue";
 import Topology from "./pages/Topology.vue";
 import GraphView from "./pages/GraphView.vue";
+import NocDashboard from "./pages/NocDashboard.vue";
 const Settings = () => import("./pages/Settings.vue");
 import Setup from "./pages/Setup.vue";
 import StatusPage from "./pages/StatusPage.vue";
@@ -173,6 +174,11 @@ const routes = [
                 name: "GraphView",
                 path: "/graph-view",
                 component: GraphView,
+            },
+            {
+                name: "NocDashboard",
+                path: "/noc-dashboard",
+                component: NocDashboard,
             },
         ],
     },
