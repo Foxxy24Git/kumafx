@@ -282,7 +282,7 @@ function layoutTreemap(groups, width, height) {
     });
 }
 
-module.exports = {
+export {
     normalizeMonitors,
     getDescendantMonitorIds,
     getMonitorStatus,
