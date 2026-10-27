@@ -9,9 +9,11 @@ const assert = require("node:assert");
         getCardCount,
         buildSunburstData,
         buildTreemapData,
-        describeArc,
         layoutSunburst,
         layoutTreemap,
+        normalizeKumaMonitors,
+        filterMonitors,
+        getNodeWeight,
     } = await import("../../src/noc-dashboard.js");
 
     describe("NOC dashboard normalization & status helpers", () => {
@@ -96,21 +98,130 @@ const assert = require("node:assert");
             }
         });
 
-        it("lays out multicore treemap bounded by dimensions with varied child cell areas", () => {
+        it("fits all groups inside the bounded container height without vertical overflow", () => {
             const normalized = normalizeMonitors(rawMonitors, heartbeats);
             const treemap = buildTreemapData(normalized);
-            const groups = layoutTreemap(treemap, 800, 500);
+            const groups = layoutTreemap(treemap, 800, 600);
 
             assert.ok(groups.length >= 2);
-            for (const grp of groups) {
-                assert.ok(grp.x >= 0 && grp.x + grp.width <= 800 + 0.1);
-                assert.ok(grp.y >= 0 && grp.y + grp.height <= 500 + 0.1);
-                for (const child of grp.children) {
+            assert.ok(groups.every(group => group.x >= 0 && group.x + group.width <= 800 + 0.1));
+            assert.ok(groups.every(group => group.y >= 0 && group.y + group.height <= 600 + 0.1));
+            for (const group of groups) {
+                for (const child of group.children) {
                     assert.ok(child.width > 0 && child.height > 0);
-                    assert.ok(child.x >= grp.x - 0.1 && child.x + child.width <= grp.x + grp.width + 0.1);
-                    assert.ok(child.y >= grp.y - 0.1 && child.y + child.height <= grp.y + grp.height + 0.1);
+                    assert.ok(child.x >= 0 && child.x + child.width <= group.width + 0.1);
+                    assert.ok(child.y >= 0 && child.y + child.height <= group.height + 0.1);
                 }
             }
+        });
+
+        it("assigns stable unique weights per monitor id across repeated calls", () => {
+            const w1 = getNodeWeight(101);
+            const w2 = getNodeWeight(102);
+            assert.strictEqual(w1, getNodeWeight(101));
+            assert.notStrictEqual(w1, w2);
+            assert.ok(w1 >= 8 && w1 <= 24);
+        });
+
+        it("assigns non-uniform sizes to all nodes even without tags for 16 and 24 node groups", () => {
+            const raw16 = Object.fromEntries(Array.from({ length: 16 }, (_, i) => [i + 1, { id: i + 1, name: `ATM-${i + 1}`, type: "ping", parent: 100, tags: [] }]));
+            raw16[100] = { id: 100, name: "Batusangkar", type: "group" };
+            const tree16 = buildTreemapData(normalizeMonitors(raw16, {}));
+            const g16 = layoutTreemap(tree16, 325, 480)[0];
+            const areas16 = new Set(g16.children.map(c => Math.round(c.width * c.height)));
+            assert.strictEqual(new Set(tree16[0].children.map(c => c.weight)).size, 16);
+            assert.ok(areas16.size >= 8, `Expected >=8 distinct node areas for 16-node group without tags, got ${areas16.size}`);
+
+            const raw24 = Object.fromEntries(Array.from({ length: 24 }, (_, i) => [i + 1, { id: i + 1, name: `ATM-${i + 1}`, type: "ping", parent: 200, tags: [] }]));
+            raw24[200] = { id: 200, name: "Payakumbuh", type: "group" };
+            const tree24 = buildTreemapData(normalizeMonitors(raw24, {}));
+            const g24 = layoutTreemap(tree24, 325, 480)[0];
+            const areas24 = new Set(g24.children.map(c => Math.round(c.width * c.height)));
+            assert.ok(areas24.size >= 12, `Expected >=12 distinct node areas for 24-node group without tags, got ${areas24.size}`);
+        });
+
+        it("creates varied aspect ratios for identical weight nodes like PRTG squarify", () => {
+            const nodes = Array.from({ length: 15 }, (_, id) => ({ id, weight: 1 }));
+            const groups = layoutTreemap([{ id: 1, name: "Group", children: nodes }], 800, 600);
+            const children = groups[0].children;
+            const aspectRatios = new Set(children.map(child => (child.width / child.height).toFixed(2)));
+            assert.ok(aspectRatios.size > 2, `Expected >2 aspect ratios, got ${aspectRatios.size}`);
+        });
+
+        it("keeps equal-weight node rectangles readable without thin strips", () => {
+            const nodes = Array.from({ length: 24 }, (_, id) => ({ id, weight: 1 }));
+            const children = layoutTreemap([{ id: 1, name: "Group", children: nodes }], 800, 600)[0].children;
+            const validDimensions = children.every(child => child.width > 5 && child.height > 5);
+            const validRatios = children.every(child => Math.max(child.width / child.height, child.height / child.width) < 5);
+            assert.strictEqual(validDimensions, true, "Nodes should maintain minimum width and height");
+            assert.strictEqual(validRatios, true, "Nodes should avoid extreme aspect ratio strips");
+        });
+
+        it("produces varied widths and heights among mosaic cells based on weights", () => {
+            const nodes = [
+                { id: 1, weight: 1 },
+                { id: 2, weight: 3 },
+                { id: 3, weight: 1 },
+                { id: 4, weight: 4 },
+                { id: 5, weight: 2 },
+            ];
+            const groups = layoutTreemap([{ id: 1, name: "Group", children: nodes }], 800, 600);
+            const children = groups[0].children;
+            const widths = new Set(children.map(child => Math.round(child.width)));
+            const heights = new Set(children.map(child => Math.round(child.height)));
+            assert.ok(widths.size > 1, "Cells should have varied widths");
+            assert.ok(heights.size > 1, "Cells should have varied heights");
+        });
+
+        it("maps live Kuma records to safe ATM statuses and fallback fields", () => {
+            const source = {
+                1: { id: 1, name: "Region", type: "group" },
+                2: { id: 2, name: "ATM A", type: "ping", hostname: "10.0.0.1", parent: 1, active: 1 },
+                3: { id: 3, name: "ATM B", type: "ping", active: 0 },
+                4: { id: 4, name: "ATM C", type: "ping" },
+                5: { id: 5, name: "ATM D", type: "ping" },
+                6: { id: 6, name: "ATM E", type: "ping" },
+            };
+            const beats = {
+                2: { status: 1, ping: 180, time: "2026-10-28 10:00:00" },
+                3: { status: 0 },
+                4: { status: 0, msg: "Timeout" },
+                5: { status: 2 },
+                6: { status: 1, ping: 30 },
+            };
+            const nodes = normalizeKumaMonitors(source, beats);
+            assert.strictEqual(nodes.length, 5);
+            assert.deepStrictEqual(nodes.map(m => m.status), ["WARNING", "PAUSED", "DOWN", "PENDING", "UP"]);
+            assert.strictEqual(nodes[0].group, "Region");
+            assert.strictEqual(nodes[0].hostname, "10.0.0.1");
+            assert.strictEqual(nodes[0].lastHeartbeat, "2026-10-28 10:00:00");
+            assert.strictEqual(nodes[2].hostname, "ATM C");
+            assert.strictEqual(nodes[2].group, "Ungrouped");
+            assert.strictEqual(nodes[2].errorMessage, "Timeout");
+            assert.strictEqual(normalizeKumaMonitors({ 7: { id: 7, name: "Fresh", type: "ping" } }, {})[0].status, "PENDING");
+        });
+
+        it("renders ungrouped monitors in the treemap", () => {
+            const monitors = normalizeKumaMonitors({ 9: { id: 9, name: "No group ATM", type: "ping" } });
+            const groups = buildTreemapData({ monitors, groupsById: {} });
+            assert.strictEqual(groups.length, 1);
+            assert.strictEqual(groups[0].name, "Ungrouped");
+            assert.strictEqual(groups[0].children[0].id, 9);
+        });
+
+        it("filters 420 nodes by group, status, name and IP without truncation", () => {
+            const source = Object.fromEntries(Array.from({ length: 420 }, (_, index) => [index + 100, {
+                id: index + 100, name: `ATM ${index}`, hostname: `10.0.1.${index}`, type: "ping", parent: index < 210 ? 1 : 2,
+            }]));
+            source[1] = { id: 1, type: "group", name: "North" };
+            source[2] = { id: 2, type: "group", name: "South" };
+            const beats = Object.fromEntries(Array.from({ length: 420 }, (_, index) => [index + 100, { status: index === 215 ? 0 : 1, ping: 12 }]));
+            const nodes = normalizeKumaMonitors(source, beats);
+            assert.strictEqual(nodes.length, 420);
+            assert.strictEqual(filterMonitors(nodes, { groupId: 2 }).length, 210);
+            assert.deepStrictEqual(filterMonitors(nodes, { groupId: 2, status: "DOWN", query: "10.0.1.215" }).map(m => m.name), ["ATM 215"]);
+            const groups = layoutTreemap(buildTreemapData({ monitors: nodes, groupsById: { 1: source[1], 2: source[2] } }), 800, 1000);
+            assert.strictEqual(groups.reduce((sum, group) => sum + group.children.length, 0), 420);
         });
 
         it("normalizes shared NOC config payload safely to 5 cards with validated group IDs", () => {

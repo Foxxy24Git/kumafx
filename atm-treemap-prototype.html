@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ATM Multi-Core Monitoring Dashboard (PRTG Treemap Style)</title>
+  <!-- D3.js for squarified treemap layout -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <style>
+    :root {
+      --bg-dark: #12161c;
+      --bg-panel: #1b212b;
+      --bg-group: #232a36;
+      --border-color: #2e3846;
+      --border-focus: #3b82f6;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      /* PRTG & Kuma Status Palette */
+      --status-up: #8cb82b;
+      --status-up-subtle: #7ca822;
+      --status-warn: #eab308;
+      --status-warn-orange: #f97316;
+      --status-down: #dc2626;
+      --status-paused: #64748b;
+      --status-flapping: #e11d48;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Navigation Filter Bar (PRTG Style) */
+    header.filter-bar {
+      height: 52px;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      z-index: 20;
+      flex-shrink: 0;
+      overflow-x: auto;
+    }
+
+    .brand-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #38bdf8;
+      white-space: nowrap;
+      margin-right: 8px;
+    }
+
+    .brand-title .live-pulse {
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #10b981;
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      height: 32px;
+      padding: 0 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .filter-group label {
+      margin-right: 6px;
+      color: var(--text-dim);
+      font-weight: 500;
+    }
+
+    .filter-group select, .filter-group input {
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-main);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .filter-group select option {
+      background: var(--bg-panel);
+      color: var(--text-main);
+    }
+
+    .search-box input {
+      width: 140px;
+      padding: 2px 4px;
+    }
+
+    /* Stats Quick View */
+    .stats-summary {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .stat-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.2s;
+    }
+
+    .stat-badge.active {
+      outline: 2px solid #38bdf8;
+    }
+
+    .stat-badge .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 2px;
+    }
+
+    .stat-badge.up .dot { background: var(--status-up); }
+    .stat-badge.warn .dot { background: var(--status-warn); }
+    .stat-badge.down .dot { background: var(--status-down); }
+    .stat-badge.paused .dot { background: var(--status-paused); }
+
+    .btn-action {
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      font-size: 11px;
+      padding: 5px 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .btn-action:hover {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+    }
+
+    /* Treemap Container */
+    #dashboard-viewport {
+      flex: 1;
+      position: relative;
+      background: #0f1318;
+      overflow: hidden;
+      padding: 6px;
+    }
+
+    #treemap-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Group Styling */
+    .group-rect {
+      fill: #19202a;
+      stroke: #0d1117;
+      stroke-width: 2.5px;
+      transition: fill 0.2s;
+    }
+
+    .group-rect:hover {
+      fill: #1f2733;
+    }
+
+    .group-header {
+      font-size: 10.5px;
+      font-weight: 700;
+      fill: #cbd5e1;
+      letter-spacing: 0.3px;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .group-count {
+      font-size: 9px;
+      font-weight: 500;
+      fill: #64748b;
+      pointer-events: none;
+    }
+
+    /* Node Tile Styling */
+    .node-tile {
+      stroke: #161b22;
+      stroke-width: 1px;
+      cursor: pointer;
+      transition: transform 0.15s ease, filter 0.15s ease, stroke-width 0.15s;
+    }
+
+    .node-tile:hover {
+      stroke: #ffffff;
+      stroke-width: 2px;
+      filter: brightness(1.25);
+    }
+
+    .node-text {
+      font-size: 8.5px;
+      font-weight: 600;
+      fill: #111827;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    /* Tooltip */
+    #tooltip {
+      position: absolute;
+      background: rgba(15, 23, 42, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(8px);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 11px;
+      color: #e2e8f0;
+      pointer-events: none;
+      z-index: 100;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+      display: none;
+      min-width: 180px;
+    }
+
+    #tooltip .tt-title {
+      font-weight: 700;
+      font-size: 12px;
+      color: #fff;
+      margin-bottom: 4px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 4px;
+    }
+
+    #tooltip .tt-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 3px;
+      font-size: 10.5px;
+    }
+
+    #tooltip .tt-label {
+      color: var(--text-dim);
+    }
+
+    #tooltip .tt-val {
+      font-weight: 600;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    /* Modal Detail ATM */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 200;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal-box {
+      width: 440px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8);
+      position: relative;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .modal-title {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 18px;
+    }
+
+    .modal-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .modal-field {
+      background: rgba(0, 0, 0, 0.25);
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .modal-field label {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .modal-field .val {
+      font-size: 12px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    /* Bottom Status Legend */
+    footer.status-footer {
+      height: 28px;
+      background: #0d1117;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      font-size: 11px;
+      color: var(--text-dim);
+      flex-shrink: 0;
+    }
+
+    .legend-chips {
+      display: flex;
+      gap: 14px;
+    }
+
+    .legend-chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .legend-chip .box {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Filter Bar PRTG Lookalike -->
+  <header class="filter-bar">
+    <div class="brand-title">
+      <span class="live-pulse"></span>
+      ATM MULTI-CORE OPS
+    </div>
+
+    <div class="filter-group">
+      <label>Grup:</label>
+      <select id="filter-group-select">
+        <option value="ALL">Semua Grup (30 Wilayah)</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label>Status:</label>
+      <select id="filter-status-select">
+        <option value="ALL">Semua Status</option>
+        <option value="DOWN">🔴 Down (Offline)</option>
+        <option value="WARN">🟡 Warning (Latency/Jitter)</option>
+        <option value="UP">🟢 Up (Online)</option>
+        <option value="PAUSED">⚪ Maintenance / Paused</option>
+      </select>
+    </div>
+
+    <div class="filter-group search-box">
+      <label>Cari:</label>
+      <input type="text" id="search-input" placeholder="Nama ATM / IP / Lokasi..." autocomplete="off">
+    </div>
+
+    <div class="filter-group">
+      <label>Max Tiles:</label>
+      <select id="max-tiles-select">
+        <option value="500" selected>500 ATM</option>
+        <option value="400">400 ATM</option>
+        <option value="300">300 ATM</option>
+        <option value="200">200 ATM</option>
+      </select>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="stats-summary">
+      <div class="stat-badge" id="badge-total">Total: <span id="count-total">420</span></div>
+      <div class="stat-badge up" data-status="UP"><span class="dot"></span> <span id="count-up">375</span> UP</div>
+      <div class="stat-badge warn" data-status="WARN"><span class="dot"></span> <span id="count-warn">28</span> WARN</div>
+      <div class="stat-badge down" data-status="DOWN"><span class="dot"></span> <span id="count-down">12</span> DOWN</div>
+      <div class="stat-badge paused" data-status="PAUSED"><span class="dot"></span> <span id="count-paused">5</span> OFF</div>
+    </div>
+
+    <button class="btn-action" id="btn-live-toggle" title="Toggle real-time status simulation">
+      ⚡ Live Feed: ON
+    </button>
+    <button class="btn-action" id="btn-reset-zoom" title="Reset drilldown / view">
+      ↺ Reset Zoom
+    </button>
+  </header>
+
+  <!-- Viewport Dashboard Treemap -->
+  <main id="dashboard-viewport">
+    <svg id="treemap-svg"></svg>
+    <div id="tooltip"></div>
+  </main>
+
+  <!-- Modal Detail ATM -->
+  <div class="modal-overlay" id="node-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title" id="m-atm-name">ATM-JKT-001</div>
+        <button class="modal-close" id="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-grid">
+        <div class="modal-field">
+          <label>Status Monitor</label>
+          <div class="val" id="m-status">🟢 UP (Normal)</div>
+        </div>
+        <div class="modal-field">
+          <label>Grup / Cabang</label>
+          <div class="val" id="m-group">Kanwil Jakarta 1</div>
+        </div>
+        <div class="modal-field">
+          <label>IP Address / Host</label>
+          <div class="val" id="m-ip">10.124.15.101</div>
+        </div>
+        <div class="modal-field">
+          <label>Response Time (Ping)</label>
+          <div class="val" id="m-ping">24 ms</div>
+        </div>
+        <div class="modal-field">
+          <label>Uptime 24 Jam</label>
+          <div class="val" id="m-uptime">99.88%</div>
+        </div>
+        <div class="modal-field">
+          <label>Terakhir Dicek</label>
+          <div class="val" id="m-last-check">Baru saja</div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content: flex-end; gap:8px;">
+        <button class="btn-action" id="modal-ack-btn">Acknowledge</button>
+        <button class="btn-action" style="background:#0284c7; border-color:#38bdf8;" onclick="alert('Membuka Uptime Kuma Monitor Page...')">Buka di Kuma</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer Legend -->
+  <footer class="status-footer">
+    <div class="legend-chips">
+      <div class="legend-chip"><span class="box" style="background: var(--status-up)"></span> Up (OK)</div>
+      <div class="legend-chip"><span class="box" style="background: var(--status-warn)"></span> Warning (&gt;150ms / Jitter)</div>
+      <div class="legend-chip"><span class="box" style="background: var(--status-down)"></span> Down (Packet Loss 100%)</div>
+      <div class="legend-chip"><span class="box" style="background: var(--status-paused)"></span> Maintenance / Unmanaged</div>
+    </div>
+    <div>Sistem: Uptime Kuma v3 Multi-Core Treemap Prototype | Kapasitas: 400+ ATM Node</div>
+  </footer>
+
+  <script>
+    // --- 1. DATA GENERATOR (420 ATM di 30 Grup / Cabang) ---
+    const REGIONS = [
+      "Kanwil Medan", "Kanwil Padang", "Kanwil Palembang", "Kanwil Pekanbaru",
+      "Kanwil Batam", "Kanwil Jakarta 1", "Kanwil Jakarta 2", "Kanwil Jakarta 3",
+      "Kanwil Bandung", "Kanwil Cirebon", "Kanwil Semarang", "Kanwil Solo",
+      "Kanwil Yogyakarta", "Kanwil Surabaya 1", "Kanwil Surabaya 2", "Kanwil Malang",
+      "Kanwil Denpasar", "Kanwil Mataram", "Kanwil Kupang", "Kanwil Pontianak",
+      "Kanwil Banjarmasin", "Kanwil Balikpapan", "Kanwil Samarinda", "Kanwil Manado",
+      "Kanwil Makassar", "Kanwil Kendari", "Kanwil Palu", "Kanwil Ambon",
+      "Kanwil Jayapura", "ATM Drive-Thru Khusus"
+    ];
+
+    const LOCATIONS = ["KCP", "Unit", "Mall", "SPBU", "Bandara", "Stasiun", "RSUD", "Pasar", "Kampus", "Hotel"];
+
+    let allAtmNodes = [];
+    let isLiveSimActive = true;
+    let selectedGroupFilter = "ALL";
+    let selectedStatusFilter = "ALL";
+    let searchQuery = "";
+    let maxTilesLimit = 500;
+    let zoomGroupTarget = null; // for drilldown
+
+    function generateAtmDataset() {
+      allAtmNodes = [];
+      let globalId = 1;
+
+      REGIONS.forEach((region, rIdx) => {
+        // Rata-rata 14 - 18 ATM per grup = ~430 ATM total
+        const count = 12 + Math.floor(Math.random() * 7); 
+        
+        for (let i = 1; i <= count; i++) {
+          const locType = LOCATIONS[Math.floor(Math.random() * LOCATIONS.length)];
+          const atmCode = `ATM-${String(rIdx + 1).padStart(2, '0')}${String(i).padStart(3, '0')}`;
+          
+          // Bobot status realistis: 88% UP, 7% WARN, 3% DOWN, 2% PAUSED
+          const rand = Math.random();
+          let status = "UP";
+          let ping = Math.floor(15 + Math.random() * 45); // 15-60ms
+
+          if (rand < 0.035) {
+            status = "DOWN";
+            ping = 0;
+          } else if (rand < 0.10) {
+            status = "WARN";
+            ping = Math.floor(160 + Math.random() * 180); // 160-340ms
+          } else if (rand < 0.12) {
+            status = "PAUSED";
+            ping = 0;
+          }
+
+          // Variasi ukuran tile (PRTG menggunakan weight dari sensor/priority/traffic)
+          // Ukuran tidak seragam (asimetris) sesuai permintaan user
+          const weight = 8 + Math.floor(Math.random() * 24); 
+
+          allAtmNodes.push({
+            id: globalId++,
+            code: atmCode,
+            name: `${atmCode} - ${locType} ${region.replace('Kanwil ', '')}`,
+            group: region,
+            ip: `10.${100 + rIdx}.${Math.floor(i / 10)}.${10 + (i % 240)}`,
+            status: status,
+            ping: ping,
+            weight: weight,
+            uptime: (status === "DOWN" ? (94 + Math.random() * 4).toFixed(2) : (99.2 + Math.random() * 0.79).toFixed(2)),
+            lastCheck: "Baru saja"
+          });
+        }
+      });
+    }
+
+    // --- 2. POPULATE FILTER DROPDOWNS & COUNTERS ---
+    function initUI() {
+      const groupSelect = document.getElementById("filter-group-select");
+      REGIONS.forEach(reg => {
+        const opt = document.createElement("option");
+        opt.value = reg;
+        opt.textContent = reg;
+        groupSelect.appendChild(opt);
+      });
+
+      groupSelect.addEventListener("change", (e) => {
+        selectedGroupFilter = e.target.value;
+        renderTreemap();
+      });
+
+      document.getElementById("filter-status-select").addEventListener("change", (e) => {
+        selectedStatusFilter = e.target.value;
+        renderTreemap();
+      });
+
+      document.getElementById("search-input").addEventListener("input", (e) => {
+        searchQuery = e.target.value.toLowerCase().trim();
+        renderTreemap();
+      });
+
+      document.getElementById("max-tiles-select").addEventListener("change", (e) => {
+        maxTilesLimit = parseInt(e.target.value, 10);
+        renderTreemap();
+      });
+
+      // Quick filter click badges
+      document.querySelectorAll(".stat-badge[data-status]").forEach(badge => {
+        badge.addEventListener("click", () => {
+          const st = badge.getAttribute("data-status");
+          const sel = document.getElementById("filter-status-select");
+          if (selectedStatusFilter === st) {
+            selectedStatusFilter = "ALL";
+            sel.value = "ALL";
+          } else {
+            selectedStatusFilter = st;
+            sel.value = st;
+          }
+          renderTreemap();
+        });
+      });
+
+      document.getElementById("btn-reset-zoom").addEventListener("click", () => {
+        zoomGroupTarget = null;
+        selectedGroupFilter = "ALL";
+        document.getElementById("filter-group-select").value = "ALL";
+        renderTreemap();
+      });
+
+      const liveBtn = document.getElementById("btn-live-toggle");
+      liveBtn.addEventListener("click", () => {
+        isLiveSimActive = !isLiveSimActive;
+        liveBtn.textContent = isLiveSimActive ? "⚡ Live Feed: ON" : "⏸ Live Feed: OFF";
+        liveBtn.style.color = isLiveSimActive ? "#38bdf8" : "#94a3b8";
+      });
+
+      // Modal Events
+      document.getElementById("modal-close-btn").addEventListener("click", () => {
+        document.getElementById("node-modal").classList.remove("active");
+      });
+      document.getElementById("node-modal").addEventListener("click", (e) => {
+        if (e.target.id === "node-modal") {
+          document.getElementById("node-modal").classList.remove("active");
+        }
+      });
+    }
+
+    // --- 3. STATUS COLOR MAPPING (PRTG & KUMA PALETTE) ---
+    function getNodeColor(status, ping) {
+      switch (status) {
+        case "UP":
+          // Sedikit gradasi hijau berdasarkan latency rendah vs sedang
+          return ping > 50 ? "#9ecb3c" : "#89b828";
+        case "WARN":
+          return ping > 250 ? "#f97316" : "#eab308";
+        case "DOWN":
+          return "#dc2626";
+        case "PAUSED":
+          return "#525e6f";
+        default:
+          return "#64748b";
+      }
+    }
+
+    // --- 4. TREEMAP RENDERER ENGINE (D3 HIERARCHY SQUARIFIED) ---
+    function renderTreemap() {
+      // 1. Filter Nodes
+      let filtered = allAtmNodes.filter(node => {
+        if (selectedGroupFilter !== "ALL" && node.group !== selectedGroupFilter) return false;
+        if (selectedStatusFilter !== "ALL" && node.status !== selectedStatusFilter) return false;
+        if (searchQuery) {
+          const matchCode = node.code.toLowerCase().includes(searchQuery);
+          const matchName = node.name.toLowerCase().includes(searchQuery);
+          const matchIp = node.ip.toLowerCase().includes(searchQuery);
+          const matchGrp = node.group.toLowerCase().includes(searchQuery);
+          if (!matchCode && !matchName && !matchIp && !matchGrp) return false;
+        }
+        return true;
+      });
+
+      // Batasi max tiles jika diset
+      if (filtered.length > maxTilesLimit) {
+        filtered = filtered.slice(0, maxTilesLimit);
+      }
+
+      // Update Top Status Counter
+      updateCounters(allAtmNodes);
+
+      const container = document.getElementById("dashboard-viewport");
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      const svg = d3.select("#treemap-svg");
+      svg.selectAll("*").remove(); // Bersihkan render sebelumnya
+
+      if (filtered.length === 0) {
+        svg.append("text")
+          .attr("x", width / 2)
+          .attr("y", height / 2)
+          .attr("text-anchor", "middle")
+          .attr("fill", "#64748b")
+          .attr("font-size", "14px")
+          .text("Tidak ada node ATM yang cocok dengan filter.");
+        return;
+      }
+
+      // 2. Susun Data ke Struktur Hierarki 2-Level (Root -> Group -> ATM Nodes)
+      const groupsMap = new Map();
+      filtered.forEach(node => {
+        if (!groupsMap.has(node.group)) {
+          groupsMap.set(node.group, []);
+        }
+        groupsMap.get(node.group).push(node);
+      });
+
+      const hierarchyData = {
+        name: "ATM-Network",
+        children: Array.from(groupsMap.entries()).map(([grpName, nodes]) => ({
+          name: grpName,
+          children: nodes
+        }))
+      };
+
+      const root = d3.hierarchy(hierarchyData)
+        .sum(d => d.weight || 10)
+        // Sort agar node DOWN / WARN berada di posisi strategis atau stabil
+        .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+      // 3. Hitung Squarified Treemap Layout (Ala PRTG Multi-Core)
+      // paddingInner memberi jarak tipis antar kolom grup dan antar kubus node
+      d3.treemap()
+        .size([width, height])
+        .tile(d3.treemapSquarify.ratio(1.4))
+        .paddingTop(d => d.depth === 1 ? 19 : 0) // Ruang label judul grup di atas
+        .paddingInner(d => d.depth === 1 ? 4 : 1.8) // Jarak antar kubus node
+        .paddingRight(2)
+        .paddingLeft(2)
+        .paddingBottom(2)
+        (root);
+
+      // 4. Render Grup Containers
+      const groupNodes = root.descendants().filter(d => d.depth === 1);
+      
+      const groupG = svg.selectAll(".group-g")
+        .data(groupNodes)
+        .enter()
+        .append("g")
+        .attr("class", "group-g");
+
+      // Background Rect untuk Kolom Grup
+      groupG.append("rect")
+        .attr("class", "group-rect")
+        .attr("x", d => d.x0)
+        .attr("y", d => d.y0)
+        .attr("width", d => Math.max(0, d.x1 - d.x0))
+        .attr("height", d => Math.max(0, d.y1 - d.y0))
+        .attr("rx", 3)
+        .on("dblclick", (e, d) => {
+          // Drilldown Zoom ke satu grup jika di-double click
+          document.getElementById("filter-group-select").value = d.data.name;
+          selectedGroupFilter = d.data.name;
+          renderTreemap();
+        });
+
+      // Label Header Nama Grup
+      groupG.append("text")
+        .attr("class", "group-header")
+        .attr("x", d => d.x0 + 5)
+        .attr("y", d => d.y0 + 13)
+        .text(d => {
+          const w = d.x1 - d.x0;
+          if (w < 60) return ""; // Sembunyikan label jika kolom terlalu sempit
+          const label = d.data.name;
+          return w < 120 && label.length > 14 ? label.slice(0, 12) + "…" : label;
+        });
+
+      // Label Jumlah Node dalam Grup
+      groupG.append("text")
+        .attr("class", "group-count")
+        .attr("x", d => d.x1 - 6)
+        .attr("y", d => d.y0 + 13)
+        .attr("text-anchor", "end")
+        .text(d => {
+          const w = d.x1 - d.x0;
+          return w > 85 ? `(${d.children ? d.children.length : 0})` : "";
+        });
+
+      // 5. Render Kubus-Kubus ATM Nodes (Leaf Nodes)
+      const leafNodes = root.leaves();
+      const tooltip = document.getElementById("tooltip");
+
+      const leafG = svg.selectAll(".leaf-g")
+        .data(leafNodes)
+        .enter()
+        .append("g")
+        .attr("class", "leaf-g");
+
+      leafG.append("rect")
+        .attr("class", "node-tile")
+        .attr("x", d => d.x0)
+        .attr("y", d => d.y0)
+        .attr("width", d => Math.max(0, d.x1 - d.x0))
+        .attr("height", d => Math.max(0, d.y1 - d.y0))
+        .attr("rx", 1.5)
+        .attr("fill", d => getNodeColor(d.data.status, d.data.ping))
+        .on("mousemove", (e, d) => {
+          const atm = d.data;
+          let statusBadge = atm.status === "UP" ? "🟢 UP" : (atm.status === "WARN" ? "🟡 WARNING" : (atm.status === "DOWN" ? "🔴 DOWN" : "⚪ PAUSED"));
+          
+          tooltip.style.display = "block";
+          tooltip.style.left = `${Math.min(window.innerWidth - 220, e.pageX + 12)}px`;
+          tooltip.style.top = `${Math.min(window.innerHeight - 150, e.pageY + 12)}px`;
+          tooltip.innerHTML = `
+            <div class="tt-title">${atm.name}</div>
+            <div class="tt-row"><span class="tt-label">Status:</span><span class="tt-val">${statusBadge}</span></div>
+            <div class="tt-row"><span class="tt-label">IP:</span><span class="tt-val">${atm.ip}</span></div>
+            <div class="tt-row"><span class="tt-label">Grup:</span><span class="tt-val">${atm.group}</span></div>
+            <div class="tt-row"><span class="tt-label">Ping:</span><span class="tt-val">${atm.status === 'DOWN' ? 'N/A' : atm.ping + ' ms'}</span></div>
+            <div class="tt-row"><span class="tt-label">Uptime 24h:</span><span class="tt-val">${atm.uptime}%</span></div>
+          `;
+        })
+        .on("mouseleave", () => {
+          tooltip.style.display = "none";
+        })
+        .on("click", (e, d) => {
+          openDetailModal(d.data);
+        });
+
+      // Render Label Ringkas di dalam Kotak jika Ukuran Kotak Cukup Luas
+      leafG.each(function(d) {
+        const w = d.x1 - d.x0;
+        const h = d.y1 - d.y0;
+
+        // Hanya gambar teks jika kotak minimal 42px x 18px (agar tidak berantakan di 400+ node)
+        if (w >= 45 && h >= 20) {
+          const g = d3.select(this);
+          g.append("text")
+            .attr("class", "node-text")
+            .attr("x", d.x0 + 4)
+            .attr("y", d.y0 + 12)
+            .text(d.data.code.replace("ATM-", ""));
+
+          if (w >= 65 && h >= 32) {
+            g.append("text")
+              .attr("class", "node-text")
+              .attr("x", d.x0 + 4)
+              .attr("y", d.y0 + 24)
+              .attr("font-size", "7.5px")
+              .attr("fill", "rgba(0,0,0,0.7)")
+              .text(d.data.status === "DOWN" ? "OFFLINE" : `${d.data.ping}ms`);
+          }
+        }
+      });
+    }
+
+    // --- 5. STATS COUNTER UPDATE ---
+    function updateCounters(nodes) {
+      let up = 0, warn = 0, down = 0, paused = 0;
+      nodes.forEach(n => {
+        if (n.status === "UP") up++;
+        else if (n.status === "WARN") warn++;
+        else if (n.status === "DOWN") down++;
+        else if (n.status === "PAUSED") paused++;
+      });
+
+      document.getElementById("count-total").textContent = nodes.length;
+      document.getElementById("count-up").textContent = up;
+      document.getElementById("count-warn").textContent = warn;
+      document.getElementById("count-down").textContent = down;
+      document.getElementById("count-paused").textContent = paused;
+    }
+
+    // --- 6. DETAIL MODAL ---
+    function openDetailModal(atm) {
+      document.getElementById("m-atm-name").textContent = atm.name;
+      document.getElementById("m-group").textContent = atm.group;
+      document.getElementById("m-ip").textContent = atm.ip;
+      document.getElementById("m-ping").textContent = atm.status === "DOWN" ? "Request Timeout (N/A)" : `${atm.ping} ms`;
+      document.getElementById("m-uptime").textContent = `${atm.uptime}%`;
+      document.getElementById("m-last-check").textContent = "10 detik yang lalu (Uptime Kuma Agent)";
+
+      const stElem = document.getElementById("m-status");
+      if (atm.status === "UP") {
+        stElem.textContent = "🟢 UP (Online Normal)";
+        stElem.style.color = "var(--status-up)";
+      } else if (atm.status === "WARN") {
+        stElem.textContent = "🟡 WARNING (High Latency / Jitter)";
+        stElem.style.color = "var(--status-warn)";
+      } else if (atm.status === "DOWN") {
+        stElem.textContent = "🔴 DOWN (Host Unreachable)";
+        stElem.style.color = "var(--status-down)";
+      } else {
+        stElem.textContent = "⚪ MAINTENANCE / PAUSED";
+        stElem.style.color = "var(--status-paused)";
+      }
+
+      document.getElementById("node-modal").classList.add("active");
+    }
+
+    // --- 7. SIMULASI REALTIME FEED (ALA UPTIME KUMA SOCKET.IO HEARTBEAT) ---
+    function startRealtimeSimulation() {
+      setInterval(() => {
+        if (!isLiveSimActive || allAtmNodes.length === 0) return;
+
+        // Acak 3-5 node untuk update ping atau status flapping
+        const mutateCount = 2 + Math.floor(Math.random() * 4);
+        for (let i = 0; i < mutateCount; i++) {
+          const target = allAtmNodes[Math.floor(Math.random() * allAtmNodes.length)];
+          if (target.status === "UP") {
+            // Jitter ping normal
+            target.ping = Math.max(12, Math.min(95, target.ping + Math.floor((Math.random() - 0.48) * 12)));
+            // 1% chance flapping ke WARN
+            if (Math.random() < 0.015) {
+              target.status = "WARN";
+              target.ping = 180 + Math.floor(Math.random() * 120);
+            }
+          } else if (target.status === "WARN") {
+            // 40% chance sembuh ke UP
+            if (Math.random() < 0.35) {
+              target.status = "UP";
+              target.ping = 28 + Math.floor(Math.random() * 30);
+            }
+          } else if (target.status === "DOWN") {
+            // 15% recovery chance
+            if (Math.random() < 0.15) {
+              target.status = "UP";
+              target.ping = 35 + Math.floor(Math.random() * 25);
+            }
+          }
+        }
+
+        // Render ulang treemap jika tidak sedang dalam tooltip hover
+        const tooltip = document.getElementById("tooltip");
+        if (tooltip.style.display !== "block") {
+          renderTreemap();
+        }
+      }, 3000); // Tiap 3 detik ada update detak jantung
+    }
+
+    // --- 8. INITIALIZATION ---
+    window.addEventListener("DOMContentLoaded", () => {
+      generateAtmDataset();
+      initUI();
+      renderTreemap();
+      startRealtimeSimulation();
+
+      // Handle Resize Window
+      window.addEventListener("resize", () => {
+        renderTreemap();
+      });
+    });
+  </script>
+</body>
+</html>

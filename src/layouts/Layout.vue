@@ -202,7 +202,7 @@ export default {
             const classes = {};
             classes[this.$root.theme] = true;
             classes["mobile"] = this.$root.isMobile;
-            classes["noc-graph-layout"] = this.$route.name === "GraphView" || this.$route.name === "NocDashboard";
+            classes["noc-graph-layout"] = this.$route.name === "GraphView";
             return classes;
         },
 

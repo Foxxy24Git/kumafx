@@ -33,63 +33,95 @@
         <div class="noc-main">
             <section class="noc-panel noc-treemap-panel">
                 <div class="noc-panel-head">
-                    <div>
-                        <small>GROUP OVERVIEW</small>
-                        <h2>Multi Core</h2>
-                    </div>
-                    <span class="noc-count">{{ normalized.groups.length }} grup</span>
+                    <div><small>GROUP OVERVIEW</small><h2>Multi Core</h2></div>
+                    <span class="noc-count">{{ filteredMonitors.length }} node · {{ treemapGroups.length }} grup</span>
                 </div>
-                <div v-if="!treemapRects.length" class="noc-empty">Belum ada monitor di dalam grup.</div>
-                <div v-else class="noc-svg-wrap">
-                    <svg viewBox="0 0 900 640" role="img" aria-label="Multi Core network treemap">
-                        <g v-for="group in treemapRects" :key="group.id">
-                            <rect
-                                :x="group.x + 2"
-                                :y="group.y + 2"
-                                :width="Math.max(0, group.width - 4)"
-                                :height="Math.max(0, group.height - 4)"
-                                rx="5"
-                                class="noc-group-bg"
-                                @click="openGroup(group)"
-                            />
-                            <text :x="group.x + 10" :y="group.y + 19" class="noc-group-label" @click="openGroup(group)">
-                                {{ trimText(group.name, group.width / 8) }}
-                            </text>
-                            <g
+                <div class="noc-multicore-toolbar">
+                    <div class="noc-brand"><span class="noc-live-dot"></span>ATM MULTI-CORE OPS</div>
+                    <label class="noc-filter">Grup:
+                        <select v-model="groupFilter">
+                            <option value="ALL">Semua Grup ({{ normalized.groups.length }} Wilayah)</option>
+                            <option v-for="group in normalized.groups" :key="group.id" :value="String(group.id)">{{ group.name }}</option>
+                        </select>
+                    </label>
+                    <label class="noc-filter">Status:
+                        <select v-model="statusFilter">
+                            <option value="ALL">Semua Status</option>
+                            <option value="DOWN">Down (Offline)</option>
+                            <option value="WARN">Warning (Latency/Jitter)</option>
+                            <option value="UP">Up (Online)</option>
+                            <option value="PAUSED">Maintenance / Paused</option>
+                            <option value="PENDING">Pending</option>
+                        </select>
+                    </label>
+                    <label class="noc-filter noc-search">Cari:
+                        <input v-model.trim="searchQuery" type="search" placeholder="Nama ATM / IP / Lokasi..." />
+                    </label>
+                    <div class="noc-stats">
+                        <button v-for="stat in statusStats" :key="stat.key" type="button" class="noc-stat" :class="[`noc-stat-${stat.key.toLowerCase()}`, { active: statusFilter === stat.key }]" @click="toggleStatus(stat.key)">
+                            <i></i>{{ stat.count }} {{ stat.label }}
+                        </button>
+                    </div>
+                    <button type="button" class="noc-toolbar-button" @click="resetFilters">↺ Reset Zoom</button>
+                </div>
+                <div ref="multicore" class="noc-multicore-list" :style="{ height: `${treemapHeight}px` }">
+                    <div v-if="!treemapGroups.length" class="noc-empty">Tidak ada node ATM yang cocok dengan filter.</div>
+                    <div
+                        v-for="group in treemapGroups"
+                        :key="group.id"
+                        class="noc-group-card"
+                        :style="{
+                            position: 'absolute',
+                            left: `${group.x}px`,
+                            top: `${group.y}px`,
+                            width: `${group.width}px`,
+                            height: `${group.height}px`,
+                        }"
+                    >
+                        <div class="noc-group-card-header" @dblclick="zoomGroup(group)">
+                            <div class="noc-group-title">
+                                <strong>{{ group.name }}</strong>
+                                <span class="noc-group-count">({{ group.children.length }})</span>
+                            </div>
+                        </div>
+                        <div class="noc-group-mosaic" :style="{ height: `${Math.max(0, group.height - 20)}px` }">
+                            <button
                                 v-for="node in group.children"
                                 :key="node.id"
-                                class="noc-node"
+                                type="button"
+                                class="noc-mosaic-cell"
+                                :class="`noc-cell-${node.status.toLowerCase()}`"
+                                :aria-label="`${node.name} · ${node.status} · ${node.hostname}`"
+                                :title="`${node.name} · ${node.hostname} · ${node.group}\n${node.status} · ${node.ping ?? '-'} ms · ${node.lastHeartbeat || '-'}\n${node.errorMessage || ''}`"
+                                :style="{
+                                    left: `${node.x}px`,
+                                    top: `${node.y}px`,
+                                    width: `${node.width}px`,
+                                    height: `${node.height}px`,
+                                }"
                                 @click="selectedMonitor = node"
                             >
-                                <rect
-                                    :x="node.x + 2"
-                                    :y="node.y + 2"
-                                    :width="Math.max(0, node.width - 4)"
-                                    :height="Math.max(0, node.height - 4)"
-                                    rx="3"
-                                    :fill="node.status === 'DOWN' ? '#ef4444' : '#a3d635'"
-                                />
-                                <text
-                                    v-if="node.width > 45 && node.height > 25"
-                                    :x="node.x + 8"
-                                    :y="node.y + 18"
-                                    class="noc-node-label"
-                                >
-                                    {{ trimText(node.name, node.width / 9) }}
-                                </text>
-                                <text
-                                    v-if="node.width > 65 && node.height > 43"
-                                    :x="node.x + 8"
-                                    :y="node.y + 34"
-                                    class="noc-node-tag"
-                                >
-                                    {{ trimText(node.tagNames.join(", "), node.width / 10) }}
-                                </text>
-                                <title>{{ node.name }} · {{ node.tagNames.join(", ") }} · {{ node.status }}</title>
-                            </g>
-                        </g>
-                    </svg>
+                                <strong class="noc-cell-name">{{ node.name }}</strong>
+                                <span class="noc-cell-tag">{{ node.status }}</span>
+                                <span class="noc-cell-tooltip" role="tooltip">
+                                    {{ node.name }} · {{ node.hostname }} · {{ node.group }}<br />
+                                    {{ node.status }} · {{ node.ping ?? "-" }} ms · {{ node.lastHeartbeat || "-" }}<br />
+                                    {{ node.errorMessage || "" }}
+                                </span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
+                <footer class="noc-status-footer">
+                    <div class="noc-legend-chips">
+                        <div class="noc-legend-chip"><span class="box bg-up"></span> Up (OK)</div>
+                        <div class="noc-legend-chip"><span class="box bg-warn"></span> Warning (&gt;150ms / Jitter)</div>
+                        <div class="noc-legend-chip"><span class="box bg-down"></span> Down (Packet Loss 100%)</div>
+                        <div class="noc-legend-chip"><span class="box bg-paused"></span> Maintenance / Unmanaged</div>
+                        <div class="noc-legend-chip"><span class="box bg-pending"></span> Pending</div>
+                    </div>
+                    <div>Sistem: Uptime Kuma Multi-Core Treemap | Kapasitas: 400+ ATM Node</div>
+                </footer>
             </section>
 
             <div class="noc-right">
@@ -208,8 +240,10 @@
                     <dt>Grup</dt>
                     <dd>{{ selectedMonitor.group || selectedMonitor.name }}</dd>
                     <dt>Hostname / IP</dt>
-                    <dd>{{ selectedMonitor.hostname || selectedMonitor.url || selectedMonitor.host || "-" }}</dd>
-                    <dt>Tipe</dt>
+                     <dd>{{ selectedMonitor.hostname || selectedMonitor.url || selectedMonitor.host || "-" }}</dd>
+                     <dt>IP</dt>
+                     <dd>{{ selectedMonitor.ip || "-" }}</dd>
+                     <dt>Tipe</dt>
                     <dd>{{ selectedMonitor.type || "group" }}</dd>
                     <dt>Tag</dt>
                     <dd>
@@ -222,8 +256,15 @@
                     <dt>Ping</dt>
                     <dd>{{ selectedMonitor.heartbeat?.ping ?? "-" }} ms</dd>
                     <dt>Waktu kejadian</dt>
-                    <dd>{{ selectedMonitor.heartbeat?.time || "-" }}</dd>
-                </dl>
+                     <dd>{{ selectedMonitor.heartbeat?.time || selectedMonitor.lastHeartbeat || "-" }}</dd>
+                     <dt>Uptime</dt>
+                     <dd>{{ selectedMonitor.uptime ?? "-" }}</dd>
+                     <dt>Error</dt>
+                     <dd>{{ selectedMonitor.errorMessage || selectedMonitor.heartbeat?.msg || "-" }}</dd>
+                     <dt>Uptime Kuma</dt>
+                     <dd v-if="selectedMonitor.id"><router-link :to="`/dashboard/${selectedMonitor.id}`">Buka monitor #{{ selectedMonitor.id }}</router-link></dd>
+                     <dd v-else>-</dd>
+                 </dl>
             </div>
         </div>
     </div>
@@ -233,10 +274,12 @@
 import {
     normalizeMonitors,
     getCardCount,
+    getDescendantMonitorIds,
     buildSunburstData,
     buildTreemapData,
     layoutSunburst,
     layoutTreemap,
+    normalizeKumaMonitors,
 } from "../noc-dashboard";
 
 const defaultCards = ["UP", "DOWN", "UP", "DOWN", "UP"].map((statusType, index) => ({
@@ -256,6 +299,11 @@ export default {
             selectedMonitor: null,
             saveError: "",
             saving: false,
+            multicoreWidth: 900,
+            groupFilter: "ALL",
+            statusFilter: "ALL",
+            searchQuery: "",
+            resizeObserver: null,
         };
     },
     computed: {
@@ -265,8 +313,40 @@ export default {
         arcs() {
             return layoutSunburst(buildSunburstData(this.normalized), 600, 600);
         },
-        treemapRects() {
-            return layoutTreemap(buildTreemapData(this.normalized), 900, 640);
+        statusStats() {
+            return ["UP", "WARN", "DOWN", "PAUSED", "PENDING"].map(key => ({
+                key,
+                label: key === "PAUSED" ? "OFF" : key,
+                count: this.multicoreMonitors.filter(m => m.status === (key === "WARN" ? "WARNING" : key)).length,
+            }));
+        },
+        multicoreMonitors() {
+            const adapted = new Map(normalizeKumaMonitors(this.$root.monitorList || {}, this.$root.lastHeartbeatList || {}).map(m => [String(m.id), m]));
+            return this.normalized.monitors.map(m => ({ ...m, ...adapted.get(String(m.id)) }));
+        },
+        filteredMonitors() {
+            const query = this.searchQuery.toLowerCase();
+            const groupIds = this.groupFilter === "ALL" ? null : new Set(getDescendantMonitorIds([this.groupFilter], this.normalized.groupsById).map(String));
+            return this.multicoreMonitors.filter(m =>
+                (!groupIds || groupIds.has(String(m.id))) &&
+                (this.statusFilter === "ALL" || m.status === (this.statusFilter === "WARN" ? "WARNING" : this.statusFilter)) &&
+                (!query || [m.name, m.hostname, m.url, m.host, m.group].some(value => String(value || "").toLowerCase().includes(query)))
+            );
+        },
+        treemapGroups() {
+            const width = Math.max(320, this.multicoreWidth);
+            const normalized = { ...this.normalized, monitors: this.filteredMonitors };
+            const groups = layoutTreemap(buildTreemapData(normalized), width, this.treemapHeight);
+            return groups.map(group => ({
+                ...group,
+                status: group.children.some(node => node.status === "DOWN") ? "DOWN" : "UP",
+            }));
+        },
+        treemapHeight() {
+            return Math.max(620, Math.ceil(this.filteredMonitors.length / Math.max(1, Math.floor(this.multicoreWidth / 32))) * 24 + this.treemapGroupsCount * 22);
+        },
+        treemapGroupsCount() {
+            return new Set(this.filteredMonitors.map(m => m.groupId || "ungrouped")).size;
         },
         downMonitors() {
             return this.normalized.monitors
@@ -281,12 +361,29 @@ export default {
             }
         });
         this.$root.getSocket().on("nocDashboardConfigUpdated", this.onConfigUpdated);
+        this.resizeObserver = new ResizeObserver(entries => {
+            this.multicoreWidth = entries[0].contentRect.width;
+        });
+        this.resizeObserver.observe(this.$refs.multicore);
     },
     beforeUnmount() {
         this.$root.getSocket().off("nocDashboardConfigUpdated", this.onConfigUpdated);
+        this.resizeObserver?.disconnect();
     },
     methods: {
         getCardCount,
+        toggleStatus(status) {
+            this.statusFilter = this.statusFilter === status ? "ALL" : status;
+        },
+        resetFilters() {
+            this.groupFilter = "ALL";
+            this.statusFilter = "ALL";
+            this.searchQuery = "";
+        },
+        zoomGroup(group) {
+            const selected = this.normalized.groups.find(item => item.name === group.name);
+            this.groupFilter = selected ? String(selected.id) : "ALL";
+        },
         trimText(value, maxLength) {
             const text = String(value || "");
             const max = Math.floor(Math.max(3, maxLength));
@@ -478,6 +575,87 @@ export default {
     min-width: 0;
 }
 
+.noc-multicore-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px;
+    margin: -8px -8px 14px;
+    background: #1b212b;
+    border-bottom: 1px solid #2e3846;
+    font-size: 11px;
+}
+
+.noc-brand {
+    color: #38bdf8;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.noc-filter {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #94a3b8;
+    background: #12161c;
+    border: 1px solid #2e3846;
+    border-radius: 5px;
+    padding: 4px 7px;
+    white-space: nowrap;
+}
+
+.noc-filter select,
+.noc-filter input {
+    background: transparent;
+    border: 0;
+    outline: 0;
+    color: #f1f5f9;
+    font-size: 11px;
+    min-width: 70px;
+}
+
+.noc-search input {
+    width: 135px;
+}
+
+.noc-stats {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.noc-stat,
+.noc-toolbar-button {
+    border: 1px solid #2e3846;
+    border-radius: 4px;
+    background: #232a36;
+    color: #cbd5e1;
+    padding: 4px 7px;
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.noc-stat.active,
+.noc-toolbar-button:hover {
+    outline: 1px solid #38bdf8;
+}
+
+.noc-stat i {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 4px;
+    border-radius: 2px;
+    background: #64748b;
+}
+
+.noc-stat-up i, .bg-up { background: #8cb82b; }
+.noc-stat-warn i, .bg-warn { background: #eab308; }
+.noc-stat-down i, .bg-down { background: #dc2626; }
+.noc-stat-paused i, .bg-paused { background: #64748b; }
+.noc-stat-pending i, .bg-pending { background: #3b82f6; }
+
 .noc-panel-head {
     display: flex;
     align-items: center;
@@ -508,62 +686,157 @@ export default {
     border-color: #713340;
 }
 
-.noc-svg-wrap svg,
-.noc-circle {
+.noc-multicore-list {
+    position: relative;
     width: 100%;
-    height: auto;
-    display: block;
+    overflow: hidden;
+    padding: 6px;
+    background: #0f1318;
 }
 
-.noc-svg-wrap {
-    overflow: auto;
+.noc-group-card {
+    box-sizing: border-box;
+    background: #19202a;
+    border: 2px solid #0d1117;
+    border-radius: 4px;
+    padding: 3px;
+    min-width: 0;
+    overflow: hidden;
+    transition: background 0.2s;
 }
 
-.noc-treemap-panel .noc-svg-wrap svg {
-    min-width: 650px;
+.noc-group-card:hover {
+    background: #1f2733;
 }
 
-.noc-group-bg {
-    fill: #26343e;
-    stroke: #3d5362;
-    stroke-width: 2;
-    cursor: pointer;
-}
-
-.noc-group-label {
-    fill: #e0e8ee;
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-}
-
-.noc-node {
-    cursor: pointer;
-}
-
-.noc-node rect,
-.noc-arc path {
-    stroke: #142029;
-    stroke-width: 2;
-    transition: filter 0.15s;
-}
-
-.noc-node:hover rect,
-.noc-arc:hover path {
-    filter: brightness(1.2);
-}
-
-.noc-node-label {
-    fill: #152321;
-    font-weight: 700;
-    font-size: 12px;
-    pointer-events: none;
-}
-
-.noc-node-tag {
-    fill: #26352b;
+.noc-group-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 4px;
+    height: 16px;
+    margin-bottom: 2px;
     font-size: 10px;
+    color: #cbd5e1;
+    cursor: pointer;
+    user-select: none;
+}
+
+.noc-group-title {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    justify-content: space-between;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.noc-group-title strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.noc-group-count {
+    color: #64748b;
+    font-size: 9px;
+    font-weight: 600;
+}
+
+.noc-group-mosaic {
+    position: relative;
+    width: 100%;
+}
+
+.noc-mosaic-cell {
+    position: absolute;
+    box-sizing: border-box;
+    border: 1px solid #161b22;
+    border-radius: 2px;
+    padding: 2px 3px;
+    color: #111827;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.15s ease, filter 0.15s ease, border-color 0.15s;
+}
+
+.noc-cell-up {
+    background: #8cb82b;
+}
+
+.noc-cell-warn,
+.noc-cell-warning {
+    background: #eab308;
+    color: #111827;
+}
+
+.noc-cell-down {
+    background: #dc2626;
+    color: #fff;
+}
+
+.noc-cell-paused {
+    background: #64748b;
+    color: #fff;
+}
+
+.noc-cell-pending {
+    background: #3b82f6;
+    color: #fff;
+}
+
+.noc-mosaic-cell:hover,
+.noc-arc:hover path {
+    filter: brightness(1.25);
+    border-color: #fff;
+}
+
+.noc-cell-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 8px;
+    line-height: 1.1;
+}
+
+.noc-cell-tag {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 7px;
+    line-height: 1;
+    opacity: 0.85;
+}
+
+.noc-cell-tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0b1117;
+    border: 1px solid #38bdf8;
+    color: #e2e8f0;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    white-space: nowrap;
+    z-index: 1000;
     pointer-events: none;
+    line-height: 1.3;
+    box-shadow: 0 4px 12px #000a;
+}
+
+.noc-mosaic-cell:hover .noc-cell-tooltip {
+    display: block;
 }
 
 .noc-circle {
@@ -642,6 +915,41 @@ export default {
     text-align: center;
     padding: 55px 15px;
 }
+
+.noc-status-footer {
+    height: 30px;
+    background: #0d1117;
+    border-top: 1px solid #2e3846;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    font-size: 11px;
+    color: #64748b;
+}
+
+.noc-legend-chips {
+    display: flex;
+    gap: 14px;
+}
+
+.noc-legend-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.noc-legend-chip .box {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+}
+
+.noc-legend-chip .bg-up { background: #8cb82b; }
+.noc-legend-chip .bg-warn { background: #eab308; }
+.noc-legend-chip .bg-down { background: #dc2626; }
+.noc-legend-chip .bg-paused { background: #64748b; }
+.noc-legend-chip .bg-pending { background: #3b82f6; }
 
 .noc-overlay {
     position: fixed;

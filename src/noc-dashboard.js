@@ -8,6 +8,29 @@ function asArray(source) {
 }
 
 /**
+ * Derive status from the latest heartbeat (UP, WARN, DOWN, PAUSED)
+ * @param {object} monitor Monitor record
+ * @param {object} heartbeatList Heartbeat map
+ * @returns {string} UP, WARN, DOWN, or PAUSED
+ */
+function getDetailedMonitorStatus(monitor, heartbeatList) {
+    if (monitor.active === false || monitor.active === 0) {
+        return "PAUSED";
+    }
+    const beat = heartbeatList?.[monitor.id];
+    if (!beat) {
+        return "UP";
+    }
+    if (beat.status === 0) {
+        return "DOWN";
+    }
+    if (typeof beat.ping === "number" && beat.ping > 150) {
+        return "WARN";
+    }
+    return "UP";
+}
+
+/**
  * Derive two-state status from the latest heartbeat
  * @param {object} monitor Monitor record
  * @param {object} heartbeatList Heartbeat map
@@ -16,6 +39,65 @@ function asArray(source) {
 function getMonitorStatus(monitor, heartbeatList) {
     const beat = heartbeatList?.[monitor.id];
     return beat && beat.status === 0 ? "DOWN" : "UP";
+}
+
+/**
+ * Normalize raw monitor map into monitors/groups with recursive hierarchy
+ * @param {object} monitorList Raw $root.monitorList map
+ * @param {object} heartbeatList Raw $root.lastHeartbeatList map
+ * @returns {object} Normalized { monitors, groups, groupsById }
+ */
+/**
+ * Normalize raw Kuma monitors and heartbeats to uniform ATM monitor objects
+ * @param {object|Array} monitorList Raw monitor collection
+ * @param {object} heartbeatList Raw heartbeat map
+ * @returns {Array<object>} Uniform monitor models
+ */
+function normalizeKumaMonitors(monitorList, heartbeatList = {}) {
+    const source = asArray(monitorList);
+    const groups = new Map(source.filter(m => m.type === "group").map(group => [String(group.id), group.name || "Ungrouped"]));
+    return source.filter(m => m.type !== "group").map(monitor => {
+        const beat = heartbeatList?.[monitor.id] || heartbeatList?.[String(monitor.id)];
+        let status = "PENDING";
+        if (monitor.active === false || monitor.active === 0) {
+            status = "PAUSED";
+        } else if (beat) {
+            status = beat.status === 0 ? "DOWN" : beat.status === 2 ? "PENDING" : beat.status === 3 ? "PAUSED" : typeof beat.ping === "number" && beat.ping > 150 ? "WARNING" : "UP";
+        }
+        return {
+            id: monitor.id,
+            name: monitor.name || String(monitor.id),
+            hostname: monitor.hostname || monitor.host || monitor.ip || monitor.url || monitor.name || String(monitor.id),
+            ip: monitor.ip || monitor.host,
+            group: groups.get(String(monitor.parent)) || "Ungrouped",
+            groupId: monitor.parent ?? null,
+            status,
+            ping: beat?.ping,
+            uptime: beat?.uptime,
+            lastHeartbeat: beat?.time,
+            errorMessage: beat?.msg || beat?.message,
+            kumaUrl: monitor.kumaUrl || monitor.url,
+            tags: monitor.tags || [],
+        };
+    });
+}
+
+/**
+ * Filter uniform monitor list by group ID, status, and query string
+ * @param {Array<object>} monitors Monitor collection
+ * @param {object} options Filter criteria
+ * @param {string|number|null} options.groupId Target group ID
+ * @param {string} options.status Desired monitor status filter
+ * @param {string} options.query Search string against name, hostname, IP, or group
+ * @returns {Array<object>} Filtered collection
+ */
+function filterMonitors(monitors, { groupId = null, status = "ALL", query = "" } = {}) {
+    const normalizedQuery = String(query).trim().toLowerCase();
+    return monitors.filter(monitor =>
+        (groupId === null || String(monitor.groupId) === String(groupId)) &&
+        (status === "ALL" || monitor.status === status) &&
+        (!normalizedQuery || [monitor.name, monitor.hostname, monitor.ip, monitor.group].some(value => String(value || "").toLowerCase().includes(normalizedQuery)))
+    );
 }
 
 /**
@@ -41,6 +123,7 @@ function normalizeMonitors(monitorList, heartbeatList = {}) {
         group: groupsById[String(m.parent)]?.name || "Lainnya",
         tags: (m.tags || []).map(tag => ({ name: tag.name || "No Tag", color: tag.color })),
         status: getMonitorStatus(m, heartbeatList),
+        detailedStatus: getDetailedMonitorStatus(m, heartbeatList),
         heartbeat: heartbeatList?.[m.id] || null,
     }));
 
@@ -132,6 +215,24 @@ function buildSunburstData(normalizedData) {
 }
 
 /**
+ * Derive deterministic, stable weight for a monitor to produce asymmetric tiles ala PRTG
+ * @param {string|number} id Monitor identifier
+ * @param {number} tagCount Number of tags attached
+ * @returns {number} Numeric weight between 8 and 28
+ */
+function getNodeWeight(id, tagCount = 0) {
+    const raw = String(id ?? "0");
+    let hash = 2166136261;
+    for (let i = 0; i < raw.length; i++) {
+        hash ^= raw.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    const normalized = ((hash >>> 0) % 100000) / 100000;
+    const base = 8 + normalized * 16;
+    return base + Math.min(4, Number(tagCount) || 0);
+}
+
+/**
  * Build group -> hostname hierarchy weighted for treemap sizing
  * @param {object} normalizedData Normalized monitors and groups
  * @returns {Array<object>} Group roots with weighted children
@@ -139,17 +240,14 @@ function buildSunburstData(normalizedData) {
 function buildTreemapData(normalizedData) {
     const groups = new Map();
     for (const monitor of normalizedData.monitors) {
-        const group = normalizedData.groupsById[String(monitor.groupId)];
-        if (!group) {
-            continue;
-        }
+        const group = normalizedData.groupsById[String(monitor.groupId)] || { id: "ungrouped", name: "Ungrouped" };
         if (!groups.has(group.id)) {
             groups.set(group.id, { id: group.id, name: group.name, children: [] });
         }
         groups.get(group.id).children.push({
             ...monitor,
-            weight: 1 + monitor.tags.length,
-            tagNames: monitor.tags.length ? monitor.tags.map(t => t.name) : ["No Tag"],
+            weight: getNodeWeight(monitor.id, monitor.tags?.length || 0),
+            tagNames: monitor.tags?.length ? monitor.tags.map(t => t.name) : ["No Tag"],
         });
     }
     return Array.from(groups.values());
@@ -228,7 +326,7 @@ function layoutSunburst(groups, width, height) {
 }
 
 /**
- * Lay out weighted items along the larger available axis
+ * Lay out weighted items as a responsive 2D mosaic
  * @param {Array<object>} items Items to lay out
  * @param {number} x Origin X
  * @param {number} y Origin Y
@@ -241,48 +339,85 @@ function layoutCells(items, x, y, width, height, weightKey) {
     if (!items.length || width <= 0 || height <= 0) {
         return [];
     }
-    const safeItems = items.map(item => ({ item, weight: Math.max(1, item[weightKey] || 1) }));
-    const total = safeItems.reduce((sum, entry) => sum + entry.weight, 0);
-    const sorted = safeItems.sort((a, b) => b.weight - a.weight);
+    const sorted = items.map(item => ({ item, weight: Math.max(1, item[weightKey] || 1) })).sort((a, b) => b.weight - a.weight);
     const cells = [];
-    let offset = 0;
-    for (const entry of sorted) {
-        const ratio = entry.weight / total;
-        if (width >= height) {
-            const cellWidth = width * ratio;
-            cells.push({ ...entry.item, x: x + offset, y, width: cellWidth, height });
-            offset += cellWidth;
-        } else {
-            const cellHeight = height * ratio;
-            cells.push({ ...entry.item, x, y: y + offset, width, height: cellHeight });
-            offset += cellHeight;
+    const layout = (entries, originX, originY, availableWidth, availableHeight) => {
+        if (!entries.length) {
+            return;
         }
-    }
+        if (entries.length === 1) {
+            cells.push({
+                ...entries[0].item,
+                x: originX + 2,
+                y: originY + 2,
+                width: Math.max(0, availableWidth - 4),
+                height: Math.max(0, availableHeight - 4),
+            });
+            return;
+        }
+        const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
+        let splitIndex = 1;
+        let splitWeight = entries[0].weight;
+        while (splitIndex < entries.length - 1 && splitWeight < total / 2) {
+            splitWeight += entries[splitIndex].weight;
+            splitIndex++;
+        }
+        const first = entries.slice(0, splitIndex);
+        const second = entries.slice(splitIndex);
+        const firstRatio = first.reduce((sum, entry) => sum + entry.weight, 0) / total;
+        const horizontal = availableWidth >= availableHeight;
+        if (horizontal) {
+            const firstWidth = availableWidth * firstRatio;
+            layout(first, originX, originY, firstWidth, availableHeight);
+            layout(second, originX + firstWidth, originY, availableWidth - firstWidth, availableHeight);
+        } else {
+            const firstHeight = availableHeight * firstRatio;
+            layout(first, originX, originY, availableWidth, firstHeight);
+            layout(second, originX, originY + firstHeight, availableWidth, availableHeight - firstHeight);
+        }
+    };
+    layout(sorted, x, y, width, height);
     return cells;
 }
 
 /**
- * Layout group containers and their weighted hostname rectangles
+ * Layout group containers side by side and wrap into rows, each containing a squarified node mosaic
  * @param {Array<object>} groups Group roots with weighted children
- * @param {number} width SVG canvas width
- * @param {number} height SVG canvas height
+ * @param {number} width Available container width
+ * @param {number} height Available container height
  * @returns {Array<object>} Positioned group rectangles
  */
-function layoutTreemap(groups, width, height) {
+function layoutTreemap(groups, width, height = 640) {
+    if (!groups.length || width <= 0 || height <= 0) {
+        return [];
+    }
     const prepared = groups.map(group => ({
         ...group,
-        weight: group.children.reduce((sum, child) => sum + child.weight, 0),
+        weight: group.children.reduce((sum, child) => sum + (child.weight || 1), 0),
     }));
     return layoutCells(prepared, 0, 0, width, height, "weight").map(group => {
-        const headerHeight = Math.min(26, group.height * 0.22);
+        const headerHeight = Math.min(24, Math.max(16, group.height * 0.12));
+        const contentHeight = Math.max(1, group.height - headerHeight);
+        const children = layoutCells(
+            group.children,
+            0,
+            headerHeight,
+            group.width,
+            contentHeight,
+            "weight"
+        );
+
         return {
             ...group,
-            children: layoutCells(group.children, group.x, group.y + headerHeight, group.width, group.height - headerHeight, "weight"),
+            children,
         };
     });
 }
 
 export {
+    getNodeWeight,
+    normalizeKumaMonitors,
+    filterMonitors,
     normalizeMonitors,
     getDescendantMonitorIds,
     getMonitorStatus,
