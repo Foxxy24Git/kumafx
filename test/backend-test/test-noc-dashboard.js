@@ -115,6 +115,19 @@ const assert = require("node:assert");
             }
         });
 
+        it("starts group children at y = 0 relative to mosaic container without header gap clipping", () => {
+            const raw12 = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, { id: i + 1, name: `ATM-${i + 1}`, type: "ping", parent: 50, tags: [] }]));
+            raw12[50] = { id: 50, name: "Darmasraya", type: "group" };
+            const tree12 = buildTreemapData(normalizeMonitors(raw12, {}));
+            const g12 = layoutTreemap(tree12, 175, 185)[0];
+
+            assert.strictEqual(g12.children.length, 12);
+            const minY = Math.min(...g12.children.map(c => c.y));
+            assert.ok(minY < 5, `Expected top child y < 5, got ${minY}`);
+            const maxY = Math.max(...g12.children.map(c => c.y + c.height));
+            assert.ok(maxY <= g12.height - 28, `Expected all children bottom <= mosaic height ${g12.height - 28}, got ${maxY}`);
+        });
+
         it("assigns stable unique weights per monitor id across repeated calls", () => {
             const w1 = getNodeWeight(101);
             const w2 = getNodeWeight(102);

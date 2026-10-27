@@ -396,19 +396,22 @@ function layoutTreemap(groups, width, height = 640) {
         weight: group.children.reduce((sum, child) => sum + (child.weight || 1), 0),
     }));
     return layoutCells(prepared, 0, 0, width, height, "weight").map(group => {
-        const headerHeight = Math.min(24, Math.max(16, group.height * 0.12));
+        const headerHeight = 28;
         const contentHeight = Math.max(1, group.height - headerHeight);
+        const contentWidth = Math.max(1, group.width - 10);
         const children = layoutCells(
             group.children,
             0,
-            headerHeight,
-            group.width,
+            0,
+            contentWidth,
             contentHeight,
             "weight"
         );
 
         return {
             ...group,
+            contentWidth,
+            contentHeight,
             children,
         };
     });

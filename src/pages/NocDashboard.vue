@@ -84,7 +84,7 @@
                                 <span class="noc-group-count">({{ group.children.length }})</span>
                             </div>
                         </div>
-                        <div class="noc-group-mosaic" :style="{ height: `${Math.max(0, group.height - 20)}px` }">
+                        <div class="noc-group-mosaic" :style="{ height: `${group.contentHeight}px` }">
                             <button
                                 v-for="node in group.children"
                                 :key="node.id"
