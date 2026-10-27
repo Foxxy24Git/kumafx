@@ -133,38 +133,12 @@
                         </div>
                         <span class="noc-count">Grup / Node / Tag</span>
                     </div>
-                    <div v-if="!arcs.length" class="noc-empty">Belum ada data untuk ditampilkan.</div>
-                    <svg
-                        v-else
-                        viewBox="0 0 600 600"
-                        class="noc-circle"
-                        role="img"
-                        aria-label="Sunburst status by group hostname and tag"
-                    >
-                        <g
-                            v-for="(arc, index) in arcs"
-                            :key="`${arc.layer}-${arc.id}-${index}`"
-                            class="noc-arc"
-                            @click="selectArc(arc)"
-                        >
-                            <path :d="arc.path" :fill="arc.status === 'DOWN' ? '#ef4444' : '#a3d635'" />
-                            <title>{{ arc.name }} · {{ arc.status }}</title>
-                        </g>
-                        <circle cx="300" cy="300" r="78" class="noc-circle-hole" />
-                        <text x="300" y="292" class="noc-circle-center">NETWORK</text>
-                        <text x="300" y="316" class="noc-circle-total">{{ normalized.monitors.length }} nodes</text>
-                    </svg>
-                    <div class="noc-legend">
-                        <span>
-                            <i class="noc-dot up"></i>
-                            UP
-                        </span>
-                        <span>
-                            <i class="noc-dot down"></i>
-                            DOWN
-                        </span>
-                        <span>Inner: Group &nbsp;·&nbsp; Middle: Node &nbsp;·&nbsp; Outer: Tag</span>
-                    </div>
+                    <CircleView
+                        :monitor-list="$root.monitorList || {}"
+                        :last-heartbeat-list="$root.lastHeartbeatList || {}"
+                        :instance-name="$root.info?.name || 'All Monitors'"
+                        @select-monitor="selectedMonitor = $event"
+                    />
                 </section>
 
                 <section class="noc-panel noc-down-panel">
@@ -275,12 +249,11 @@ import {
     normalizeMonitors,
     getCardCount,
     getDescendantMonitorIds,
-    buildSunburstData,
     buildTreemapData,
-    layoutSunburst,
     layoutTreemap,
     normalizeKumaMonitors,
 } from "../noc-dashboard";
+import CircleView from "../components/CircleView.vue";
 
 const defaultCards = ["UP", "DOWN", "UP", "DOWN", "UP"].map((statusType, index) => ({
     id: `card-${index + 1}`,
@@ -291,6 +264,9 @@ const defaultCards = ["UP", "DOWN", "UP", "DOWN", "UP"].map((statusType, index) 
 
 export default {
     name: "NocDashboard",
+    components: {
+        CircleView,
+    },
     data() {
         return {
             config: { cards: defaultCards },
@@ -309,9 +285,6 @@ export default {
     computed: {
         normalized() {
             return normalizeMonitors(this.$root.monitorList || {}, this.$root.lastHeartbeatList || {});
-        },
-        arcs() {
-            return layoutSunburst(buildSunburstData(this.normalized), 600, 600);
         },
         statusStats() {
             return ["UP", "WARN", "DOWN", "PAUSED", "PENDING"].map(key => ({
@@ -416,23 +389,7 @@ export default {
                 }
             });
         },
-        selectArc(arc) {
-            if (arc.layer === 1) {
-                this.openGroup(arc);
-            } else if (arc.layer === 3) {
-                this.selectedMonitor = arc.monitor;
-            } else {
-                this.selectedMonitor = arc;
-            }
-        },
-        openGroup(group) {
-            this.selectedMonitor = {
-                ...group,
-                status: group.status || (group.children.some((c) => c.status === "DOWN") ? "DOWN" : "UP"),
-                group: group.name,
-                tags: [],
-            };
-        },
+
     },
 };
 </script>
@@ -478,8 +435,7 @@ export default {
     border-color: #704f27;
 }
 
-.noc-live-dot,
-.noc-dot {
+.noc-live-dot {
     display: inline-block;
     width: 8px;
     height: 8px;
@@ -488,8 +444,7 @@ export default {
     margin-right: 6px;
 }
 
-.noc-live.disconnected .noc-live-dot,
-.noc-dot.down {
+.noc-live.disconnected .noc-live-dot {
     background: #ef4444;
 }
 
@@ -791,8 +746,7 @@ export default {
     color: #fff;
 }
 
-.noc-mosaic-cell:hover,
-.noc-arc:hover path {
+.noc-mosaic-cell:hover {
     filter: brightness(1.25);
     border-color: #fff;
 }
@@ -837,43 +791,6 @@ export default {
 
 .noc-mosaic-cell:hover .noc-cell-tooltip {
     display: block;
-}
-
-.noc-circle {
-    max-width: 460px;
-    margin: 0 auto;
-}
-
-.noc-arc {
-    cursor: pointer;
-}
-
-.noc-circle-hole {
-    fill: #142029;
-}
-
-.noc-circle-center,
-.noc-circle-total {
-    text-anchor: middle;
-    fill: #9badba;
-    font-weight: 800;
-    letter-spacing: 2px;
-    font-size: 13px;
-}
-
-.noc-circle-total {
-    fill: #e9f1f5;
-    font-size: 19px;
-    letter-spacing: 0;
-}
-
-.noc-legend {
-    display: flex;
-    gap: 15px;
-    flex-wrap: wrap;
-    justify-content: center;
-    color: #91a5b3;
-    font-size: 10px;
 }
 
 .noc-down-grid {

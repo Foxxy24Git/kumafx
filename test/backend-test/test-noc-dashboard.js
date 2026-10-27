@@ -14,6 +14,8 @@ const assert = require("node:assert");
         normalizeKumaMonitors,
         filterMonitors,
         getNodeWeight,
+        buildPrtgHierarchy,
+        layoutPrtgSunburst,
     } = await import("../../src/noc-dashboard.js");
 
     describe("NOC dashboard normalization & status helpers", () => {
@@ -96,6 +98,36 @@ const assert = require("node:assert");
                 assert.ok(arc.outerRadius > arc.innerRadius);
                 assert.ok(arc.endAngle >= arc.startAngle);
             }
+        });
+
+        it("builds the PRTG hierarchy with nested groups and all four heartbeat statuses", () => {
+            const monitors = {
+                ...rawMonitors,
+                4: { id: 4, name: "Nested", type: "group", parent: 1 },
+                30: { id: 30, name: "Nested ATM", type: "ping", parent: 4, tags: [] },
+            };
+            const hierarchy = buildPrtgHierarchy(monitors, {
+                10: { status: 1, ping: 25 },
+                11: { status: 0, ping: 0 },
+                20: { status: 2, ping: 50 },
+                30: { status: 3, ping: null },
+            }, "NOC");
+            assert.strictEqual(hierarchy.name, "NOC");
+            assert.ok(hierarchy.children.some(group => group.name === "Group Utama"));
+            const nested = hierarchy.children[0].children.find(group => group.name === "Nested");
+            assert.strictEqual(nested.children[0].status, "MAINTENANCE");
+            assert.strictEqual(hierarchy.children.find(group => group.name === "Group Kantor").children[0].status, "PENDING");
+        });
+
+        it("makes down nodes protrude and preserves node and tag detail in radial layout", () => {
+            const monitors = { ...rawMonitors, 11: { ...rawMonitors[11], tags: [{ name: "Telkom" }] } };
+            const hierarchy = buildPrtgHierarchy(monitors, heartbeats, "NOC");
+            const arcs = layoutPrtgSunburst(hierarchy, 600, 600);
+            const down = arcs.find(arc => arc.name === "10.0.0.2");
+            const up = arcs.find(arc => arc.name === "10.0.0.1");
+            assert.ok(down.outerRadius > up.outerRadius);
+            assert.ok(arcs.some(arc => arc.name === "Telkom" && arc.status === "DOWN"));
+            assert.ok(arcs.some(arc => arc.name === "Subgroup ATM" && arc.status === "DOWN"));
         });
 
         it("fits all groups inside the bounded container height without vertical overflow", () => {

@@ -86,6 +86,7 @@
         "compare-versions": "~3.6.0",
         "country-flag-emoji-polyfill": "~0.1.8",
         "croner": "~8.1.2",
+        "d3": "7.9.0",
         "dayjs": "~1.11.19",
         "dev-null": "~0.1.1",
         "express": "~4.22.1",

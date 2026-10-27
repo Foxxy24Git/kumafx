@@ -1,3 +1,5 @@
+import * as d3 from "d3";
+
 /**
  * Convert object-map or array data to an array
  * @param {object|Array} source Source collection
@@ -237,6 +239,207 @@ function getNodeWeight(id, tagCount = 0) {
  * @param {object} normalizedData Normalized monitors and groups
  * @returns {Array<object>} Group roots with weighted children
  */
+const PRtgStatusRank = { UP: 0, PENDING: 1, MAINTENANCE: 2, DOWN: 3 };
+
+/**
+ * Build root, group, monitor, and tag hierarchy from live data.
+ * @param {object|Array} monitorList Monitor collection.
+ * @param {object} heartbeatList Latest heartbeat map.
+ * @param {string} rootName Root display name.
+ * @returns {object} Hierarchy root.
+ */
+function buildPrtgHierarchy(monitorList, heartbeatList = {}, rootName = "All Monitors") {
+    const source = asArray(monitorList);
+    const groups = new Map(source.filter(m => m.type === "group").map(group => [String(group.id), { ...group, monitors: [] }]));
+    const ungroupedMonitors = [];
+
+    for (const monitor of source) {
+        if (monitor.type === "group") {
+            continue;
+        }
+        const beat = heartbeatList?.[monitor.id] || heartbeatList?.[String(monitor.id)];
+        let statusNum = 2;
+        if (beat && typeof beat.status === "number") {
+            statusNum = beat.status;
+        }
+        const status = ["DOWN", "UP", "PENDING", "MAINTENANCE"][statusNum] || "PENDING";
+        const ping = beat?.ping != null ? beat.ping : null;
+        const tags = (monitor.tags || []).map(t => ({ name: t.name, color: t.color }));
+
+        const monitorNode = {
+            id: monitor.id,
+            name: monitor.hostname || monitor.name || String(monitor.id),
+            hostname: monitor.hostname || monitor.host || monitor.url || monitor.ip || monitor.name || String(monitor.id),
+            type: "monitor",
+            status,
+            statusNum,
+            ping,
+            tags,
+            monitor,
+            children: tags.map(tag => ({
+                id: `${monitor.id}:tag:${tag.name}`,
+                name: tag.name,
+                color: tag.color,
+                type: "tag",
+                status,
+                statusNum,
+                ping,
+                monitor,
+                tags: [],
+                children: [],
+            })),
+        };
+
+        const targetGroup = groups.get(String(monitor.parent));
+        if (targetGroup) {
+            targetGroup.monitors.push(monitorNode);
+        } else {
+            ungroupedMonitors.push(monitorNode);
+        }
+    }
+
+    const buildGroupNode = (group) => {
+        const subGroupItems = source.filter(item => item.type === "group" && String(item.parent) === String(group.id));
+        const childGroups = subGroupItems.map(item => buildGroupNode(groups.get(String(item.id))));
+        const childMonitors = group.monitors;
+        const allChildren = [...childGroups, ...childMonitors];
+
+        let worstStatus = "UP";
+        let worstRank = 0;
+        for (const child of allChildren) {
+            const rank = PRtgStatusRank[child.status] || 0;
+            if (rank > worstRank) {
+                worstRank = rank;
+                worstStatus = child.status;
+            }
+        }
+
+        return {
+            id: group.id,
+            name: group.name || "Unnamed Group",
+            type: "group",
+            status: worstStatus,
+            children: allChildren,
+        };
+    };
+
+    const topGroups = source.filter(m => m.type === "group" && (m.parent == null || m.parent === undefined || !groups.has(String(m.parent))));
+    const rootChildren = topGroups.map(g => buildGroupNode(groups.get(String(g.id))));
+    if (ungroupedMonitors.length > 0) {
+        rootChildren.push(...ungroupedMonitors);
+    }
+
+    let rootStatus = "UP";
+    let rootRank = 0;
+    for (const child of rootChildren) {
+        const rank = PRtgStatusRank[child.status] || 0;
+        if (rank > rootRank) {
+            rootRank = rank;
+            rootStatus = child.status;
+        }
+    }
+
+    return {
+        id: "root",
+        name: rootName,
+        type: "root",
+        status: rootStatus,
+        children: rootChildren,
+    };
+}
+
+/**
+ * Generate D3 radial arcs for the current hierarchy level.
+ * @param {object} data Hierarchy root.
+ * @param {number} width SVG width.
+ * @param {number} height SVG height.
+ * @returns {Array<object>} Renderable arcs.
+ */
+function layoutPrtgSunburst(data, width = 600, height = 600) {
+    if (!data || !data.children || !data.children.length) {
+        return [];
+    }
+    const maxRadius = Math.min(width, height) * 0.44;
+    const centerHoleRadius = 78;
+
+    const root = d3.hierarchy(data)
+        .sum(node => {
+            if (node.type === "tag") {
+                return 1 / (node.monitor?.tags?.length || 1);
+            }
+            if (node.type === "monitor") {
+                return node.children && node.children.length ? 0 : 1;
+            }
+            return 0;
+        })
+        .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+    if (!root.value) {
+        return [];
+    }
+
+    const partition = d3.partition().size([2 * Math.PI, maxRadius]);
+    partition(root);
+
+    const maxDepth = Math.max(1, root.height);
+    const nominalThickness = (maxRadius - centerHoleRadius - 20) / maxDepth;
+
+    const STATUS_COLORS = {
+        DOWN: "#dc2626",
+        UP: "#8cb82b",
+        PENDING: "#3b82f6",
+        MAINTENANCE: "#64748b",
+    };
+
+    return root.descendants()
+        .filter(node => node.depth > 0)
+        .map(node => {
+            const isDown = node.data.status === "DOWN";
+            let innerRadius = centerHoleRadius + (node.depth - 1) * nominalThickness;
+            let outerRadius = innerRadius + nominalThickness - 2;
+
+            const jitter = ((getNodeWeight(node.data.id || node.data.name, node.data.tags?.length || 0) - 18) / 18) * 6;
+            outerRadius += jitter;
+
+            if (isDown) {
+                if (node.data.type === "monitor" || node.depth >= 3) {
+                    outerRadius += 22;
+                } else if (node.data.type === "tag") {
+                    innerRadius += 8;
+                    outerRadius += 26;
+                }
+            }
+
+            const arcGen = d3.arc()
+                .startAngle(node.x0 - Math.PI / 2)
+                .endAngle(node.x1 - Math.PI / 2)
+                .padAngle(Math.min((node.x1 - node.x0) / 4, 0.008))
+                .padRadius(maxRadius / 2)
+                .innerRadius(innerRadius)
+                .outerRadius(outerRadius);
+
+            const color = isDown ? STATUS_COLORS.DOWN : (STATUS_COLORS[node.data.status] || STATUS_COLORS.UP);
+
+            return {
+                ...node.data,
+                depth: node.depth,
+                layer: node.depth,
+                startAngle: node.x0,
+                endAngle: node.x1,
+                innerRadius,
+                outerRadius,
+                color,
+                path: arcGen(),
+                hasChildren: Boolean(node.children && node.children.length),
+            };
+        });
+}
+
+/**
+ * Build group and monitor hierarchy with weights for treemap layout.
+ * @param {object} normalizedData Normalized data.
+ * @returns {Array<object>} Treemap group collection.
+ */
 function buildTreemapData(normalizedData) {
     const groups = new Map();
     for (const monitor of normalizedData.monitors) {
@@ -430,4 +633,6 @@ export {
     describeArc,
     layoutSunburst,
     layoutTreemap,
+    buildPrtgHierarchy,
+    layoutPrtgSunburst,
 };
