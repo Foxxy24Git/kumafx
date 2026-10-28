@@ -349,11 +349,44 @@ function buildPrtgHierarchy(monitorList, heartbeatList = {}, rootName = "All Mon
 }
 
 /**
- * Compute the outside hostname/IP callout line and label position for a
- * DOWN monitor arc so it can be rendered pointing away from the exploded
- * segment.
+ * Compute the inside hostname label position for a DOWN monitor arc.
  * @param {object} arc Rendered arc entry from layoutPrtgSunburst.
- * @returns {object|null} Label/line geometry, or null if not an exploded DOWN monitor.
+ * @returns {object|null} Label geometry or null if not applicable.
+ */
+function getInsideDownNodeLabel(arc) {
+    if (!arc || arc.status !== "DOWN" || arc.type !== "monitor") {
+        return null;
+    }
+
+    const monitor = arc.monitor || arc;
+    const hostname = monitor.hostname || monitor.host || monitor.name || String(monitor.id);
+    const angle = (arc.startAngle + arc.endAngle) / 2 - Math.PI / 2;
+    const r = (arc.innerRadius + arc.outerRadius) / 2;
+    const maxCharacters = Math.floor(((arc.endAngle - arc.startAngle) * r - 8) / 6);
+    if (maxCharacters < 2) {
+        return null;
+    }
+    const text = hostname.length > maxCharacters ? `${hostname.slice(0, maxCharacters - 1)}…` : hostname;
+    let rotation = angle * 180 / Math.PI + 90;
+    if (rotation > 90 && rotation < 270) {
+        rotation += 180;
+    }
+
+    return {
+        id: arc.id,
+        text,
+        x: Math.cos(angle) * r,
+        y: Math.sin(angle) * r,
+        r,
+        rotation,
+        monitor: arc.monitor || arc,
+    };
+}
+
+/**
+ * Compute legacy outside callout geometry for a DOWN monitor arc.
+ * @param {object} arc Rendered arc entry from layoutPrtgSunburst.
+ * @returns {object|null} Callout geometry or null if not applicable.
  */
 function getDownNodeLabel(arc) {
     if (!arc || arc.status !== "DOWN" || arc.type !== "monitor") {
@@ -403,11 +436,13 @@ function layoutPrtgSunburst(data, width = 600, height = 600) {
 
     const root = d3.hierarchy(data)
         .sum(node => {
+            const isDown = node.status === "DOWN";
+            const downWeight = isDown ? 36 : 1;
             if (node.type === "tag") {
-                return 1 / (node.monitor?.tags?.length || 1);
+                return (1 / (node.monitor?.tags?.length || 1)) * downWeight;
             }
             if (node.type === "monitor") {
-                return node.children && node.children.length ? 0 : 1;
+                return (node.children && node.children.length ? 0 : 1) * downWeight;
             }
             return 0;
         })
@@ -442,12 +477,14 @@ function layoutPrtgSunburst(data, width = 600, height = 600) {
 
             if (isDown) {
                 if (node.data.type === "monitor" || node.depth >= 3) {
-                    outerRadius += 45;
+                    outerRadius += 90;
                 } else if (node.data.type === "tag") {
                     innerRadius += 8;
                     outerRadius += 35;
                 }
             }
+
+            outerRadius = Math.min(outerRadius, maxRadius + 24);
 
             const arcGen = d3.arc()
                 .startAngle(node.x0 - Math.PI / 2)
@@ -675,4 +712,5 @@ export {
     buildPrtgHierarchy,
     layoutPrtgSunburst,
     getDownNodeLabel,
+    getInsideDownNodeLabel,
 };

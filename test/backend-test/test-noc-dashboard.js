@@ -17,6 +17,7 @@ const assert = require("node:assert");
         buildPrtgHierarchy,
         layoutPrtgSunburst,
         getDownNodeLabel,
+        getInsideDownNodeLabel,
     } = await import("../../src/noc-dashboard.js");
 
     describe("NOC dashboard normalization & status helpers", () => {
@@ -129,6 +130,61 @@ const assert = require("node:assert");
             assert.ok(down.outerRadius > up.outerRadius);
             assert.ok(arcs.some(arc => arc.name === "Telkom" && arc.status === "DOWN"));
             assert.ok(arcs.some(arc => arc.name === "Subgroup ATM" && arc.status === "DOWN"));
+        });
+
+        it("automatically expands down monitor angular arc width significantly more than normal nodes", () => {
+            const monitors = {
+                1: { id: 1, name: "Solok", type: "group" },
+                2: { id: 2, name: "ATM Solok Down", type: "ping", hostname: "atm-solok.internal", ip: "172.16.1.1", parent: 1, tags: [] },
+            };
+            for (let i = 3; i <= 30; i++) {
+                monitors[i] = { id: i, name: `ATM Solok Up ${i}`, type: "ping", hostname: `atm-${i}.internal`, parent: 1, tags: [] };
+            }
+            const heartbeats = { 2: { status: 0 } };
+            const arcs = layoutPrtgSunburst(buildPrtgHierarchy(monitors, heartbeats), 600, 600);
+            const downArc = arcs.find(arc => arc.type === "monitor" && arc.id === 2);
+            const upArc = arcs.find(arc => arc.type === "monitor" && arc.id === 3);
+
+            const downAngle = downArc.endAngle - downArc.startAngle;
+            const upAngle = upArc.endAngle - upArc.startAngle;
+
+            assert.ok(downAngle > upAngle * 2.5, `Expected downAngle (${downAngle}) to be > 2.5x upAngle (${upAngle})`);
+        });
+
+        it("keeps a down hostname readable within its sector among 450 nodes", () => {
+            const monitors = { 1: { id: 1, name: "Solok", type: "group" } };
+            for (let i = 2; i <= 451; i++) {
+                monitors[i] = { id: i, name: `ATM ${i}`, type: "ping", hostname: `host-${i}`, parent: 1, tags: [] };
+            }
+            monitors[2].hostname = "Solok-01";
+            const arcs = layoutPrtgSunburst(buildPrtgHierarchy(monitors, { 2: { status: 0 } }), 600, 600);
+            const downArc = arcs.find(arc => arc.type === "monitor" && arc.id === 2);
+            const label = getInsideDownNodeLabel(downArc);
+
+            assert.ok(label, "Expected a visible label in a 450-node chart");
+            assert.strictEqual(label.text, "Solok-01");
+        });
+
+        it("places the hostname label INSIDE the enlarged down arc with rotation matching arc trajectory", () => {
+            const arc = {
+                id: 2,
+                type: "monitor",
+                status: "DOWN",
+                startAngle: 0.1,
+                endAngle: 0.5,
+                innerRadius: 180,
+                outerRadius: 260,
+                monitor: { id: 2, name: "Solok-ATM-01", hostname: "Solok-01" },
+            };
+            const label = getInsideDownNodeLabel(arc);
+            assert.ok(label, "Expected inside label object");
+            assert.strictEqual(label.id, 2);
+            assert.strictEqual(label.text, "Solok-01");
+            assert.ok(label.r > arc.innerRadius && label.r < arc.outerRadius, `Expected label radius ${label.r} between ${arc.innerRadius} and ${arc.outerRadius}`);
+            assert.strictEqual(typeof label.x, "number");
+            assert.strictEqual(typeof label.y, "number");
+            assert.strictEqual(typeof label.rotation, "number");
+            assert.strictEqual(getInsideDownNodeLabel({ ...arc, status: "UP" }), null);
         });
 
         it("automatically expands only down monitor arcs and keeps each within the SVG canvas", () => {
