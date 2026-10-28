@@ -2,10 +2,21 @@ ARG BASE_IMAGE=louislam/uptime-kuma:base3
 
 ############################################
 # Build in Golang
-
 # Check file: builder-go.dockerfile
 ############################################
 FROM louislam/uptime-kuma:builder-go3 AS build_healthcheck
+
+############################################
+# Build Frontend
+############################################
+FROM louislam/uptime-kuma:base3 AS build_frontend
+USER node
+WORKDIR /app
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
+COPY --chown=node:node .npmrc package.json package-lock.json ./
+RUN npm ci
+COPY --chown=node:node . .
+RUN npm run build
 
 ############################################
 # Build in Node.js
@@ -20,6 +31,7 @@ COPY --chown=node:node package.json package.json
 COPY --chown=node:node package-lock.json package-lock.json
 RUN npm ci --omit=dev
 COPY . .
+COPY --chown=node:node --from=build_frontend /app/dist /app/dist
 COPY --chown=node:node --from=build_healthcheck /app/extra/healthcheck /app/extra/healthcheck
 RUN mkdir ./data
 

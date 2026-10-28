@@ -5,7 +5,8 @@ services:
       dockerfile: docker/dockerfile
       target: rootless
     image: uptime-kuma-local:latest
-    container_name: uptime-kuma
+        container_name: uptime-kuma-kumafx
+-kumafx
     restart: unless-stopped
     volumes:
       - ./data:/app/data
