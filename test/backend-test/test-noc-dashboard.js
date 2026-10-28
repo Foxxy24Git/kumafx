@@ -16,6 +16,7 @@ const assert = require("node:assert");
         getNodeWeight,
         buildPrtgHierarchy,
         layoutPrtgSunburst,
+        getDownNodeLabel,
     } = await import("../../src/noc-dashboard.js");
 
     describe("NOC dashboard normalization & status helpers", () => {
@@ -128,6 +129,43 @@ const assert = require("node:assert");
             assert.ok(down.outerRadius > up.outerRadius);
             assert.ok(arcs.some(arc => arc.name === "Telkom" && arc.status === "DOWN"));
             assert.ok(arcs.some(arc => arc.name === "Subgroup ATM" && arc.status === "DOWN"));
+        });
+
+        it("automatically expands only down monitor arcs and keeps each within the SVG canvas", () => {
+            const monitors = {
+                1: { id: 1, name: "North", type: "group" },
+                2: { id: 2, name: "ATM Down", type: "ping", hostname: "atm.local", ip: "10.0.0.2", parent: 1, tags: [] },
+                3: { id: 3, name: "ATM Up", type: "ping", hostname: "atm-up.local", parent: 1, tags: [] },
+            };
+            const downArcs = layoutPrtgSunburst(buildPrtgHierarchy(monitors, { 2: { status: 0 }, 3: { status: 1 } }), 600, 600);
+            const upArcs = layoutPrtgSunburst(buildPrtgHierarchy(monitors, { 2: { status: 1 }, 3: { status: 1 } }), 600, 600);
+            const expanded = downArcs.find(arc => arc.type === "monitor" && arc.id === 2);
+            const collapsed = upArcs.find(arc => arc.type === "monitor" && arc.id === 2);
+
+            assert.ok(expanded.outerRadius - collapsed.outerRadius >= 40);
+            assert.ok(expanded.outerRadius <= 290);
+            assert.strictEqual(downArcs.find(arc => arc.id === 3).outerRadius, upArcs.find(arc => arc.id === 3).outerRadius);
+        });
+
+        it("positions a DOWN monitor hostname and IP callout outside the arc on both sides", () => {
+            const monitor = { id: 2, name: "ATM Down", hostname: "atm.local", ip: "10.0.0.2" };
+            const right = getDownNodeLabel({ type: "monitor", status: "DOWN", monitor, startAngle: 0, endAngle: 0.2, outerRadius: 255 });
+            const left = getDownNodeLabel({ type: "monitor", status: "DOWN", monitor, startAngle: Math.PI, endAngle: Math.PI + 0.2, outerRadius: 255 });
+
+            assert.strictEqual(right.hostname, "atm.local");
+            assert.strictEqual(right.ip, "10.0.0.2");
+            assert.strictEqual(right.anchor, "start");
+            assert.ok(right.lineEndX > right.lineStartX);
+            assert.strictEqual(left.anchor, "end");
+            assert.ok(left.lineEndX < left.lineStartX);
+            assert.strictEqual(getDownNodeLabel({ type: "monitor", status: "UP", monitor }), null);
+            assert.strictEqual(getDownNodeLabel({ type: "group", status: "DOWN", monitor }), null);
+        });
+
+        it("uses hostname as the label fallback when IP is unavailable", () => {
+            const label = getDownNodeLabel({ type: "monitor", status: "DOWN", monitor: { name: "ATM 3", hostname: "atm-3.local" }, startAngle: 1, endAngle: 1.1, outerRadius: 255 });
+            assert.strictEqual(label.hostname, "atm-3.local");
+            assert.strictEqual(label.ip, null);
         });
 
         it("fits all groups inside the bounded container height without vertical overflow", () => {

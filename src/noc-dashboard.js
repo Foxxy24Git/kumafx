@@ -349,6 +349,45 @@ function buildPrtgHierarchy(monitorList, heartbeatList = {}, rootName = "All Mon
 }
 
 /**
+ * Compute the outside hostname/IP callout line and label position for a
+ * DOWN monitor arc so it can be rendered pointing away from the exploded
+ * segment.
+ * @param {object} arc Rendered arc entry from layoutPrtgSunburst.
+ * @returns {object|null} Label/line geometry, or null if not an exploded DOWN monitor.
+ */
+function getDownNodeLabel(arc) {
+    if (!arc || arc.status !== "DOWN" || arc.type !== "monitor") {
+        return null;
+    }
+
+    const monitor = arc.monitor || arc;
+    const hostname = monitor.hostname || monitor.host || monitor.name || String(monitor.id);
+    const ip = monitor.ip || (monitor.host && monitor.host !== hostname ? monitor.host : null);
+    const angle = (arc.startAngle + arc.endAngle) / 2 - Math.PI / 2;
+    const lineStartRadius = arc.outerRadius;
+    const lineEndRadius = lineStartRadius + 30;
+    const lineStartX = Math.cos(angle) * lineStartRadius;
+    const lineStartY = Math.sin(angle) * lineStartRadius;
+    const lineEndX = Math.cos(angle) * lineEndRadius;
+    const lineEndY = Math.sin(angle) * lineEndRadius;
+    const side = Math.cos(angle) >= 0 ? "right" : "left";
+
+    return {
+        id: arc.id,
+        hostname,
+        ip,
+        lineStartX,
+        lineStartY,
+        lineEndX,
+        lineEndY,
+        textX: lineEndX + (side === "right" ? 8 : -8),
+        textY: lineEndY,
+        anchor: side === "right" ? "start" : "end",
+        monitor: arc.monitor || arc,
+    };
+}
+
+/**
  * Generate D3 radial arcs for the current hierarchy level.
  * @param {object} data Hierarchy root.
  * @param {number} width SVG width.
@@ -403,10 +442,10 @@ function layoutPrtgSunburst(data, width = 600, height = 600) {
 
             if (isDown) {
                 if (node.data.type === "monitor" || node.depth >= 3) {
-                    outerRadius += 22;
+                    outerRadius += 45;
                 } else if (node.data.type === "tag") {
                     innerRadius += 8;
-                    outerRadius += 26;
+                    outerRadius += 35;
                 }
             }
 
@@ -635,4 +674,5 @@ export {
     layoutTreemap,
     buildPrtgHierarchy,
     layoutPrtgSunburst,
+    getDownNodeLabel,
 };

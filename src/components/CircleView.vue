@@ -29,7 +29,7 @@
 
         <div v-else class="noc-circle-svg-container">
             <svg
-                viewBox="0 0 600 600"
+                viewBox="-80 -80 760 760"
                 class="noc-circle"
                 role="img"
                 aria-label="Sunburst status radial bergaya PRTG"
@@ -48,6 +48,33 @@
                         @mouseleave="hideTooltip"
                     >
                         <path :d="arc.path" :fill="arc.color" />
+                    </g>
+
+                    <!-- Down Node Exploded Pointer Lines and Outside Labels -->
+                    <g v-for="label in downLabels" :key="`down-label-${label.id}`" class="noc-down-callout" @click="onArcClick(label)">
+                        <line
+                            :x1="label.lineStartX"
+                            :y1="label.lineStartY"
+                            :x2="label.lineEndX"
+                            :y2="label.lineEndY"
+                            class="noc-down-line"
+                        />
+                        <circle
+                            :cx="label.lineEndX"
+                            :cy="label.lineEndY"
+                            r="2.5"
+                            class="noc-down-pointer"
+                        />
+                        <text
+                            :x="label.textX"
+                            :y="label.textY"
+                            :text-anchor="label.anchor"
+                            dominant-baseline="central"
+                            class="noc-down-text"
+                        >
+                            <tspan class="noc-down-host">{{ label.hostname }}</tspan>
+                            <tspan v-if="label.ip" class="noc-down-ip"> · {{ label.ip }}</tspan>
+                        </text>
                     </g>
 
                     <!-- Center Hole / Root -->
@@ -135,7 +162,7 @@
 </template>
 
 <script>
-import { buildPrtgHierarchy, layoutPrtgSunburst } from "../noc-dashboard";
+import { buildPrtgHierarchy, layoutPrtgSunburst, getDownNodeLabel } from "../noc-dashboard";
 
 export default {
     name: "CircleView",
@@ -210,6 +237,9 @@ export default {
          */
         arcs() {
             return layoutPrtgSunburst(this.currentHierarchyRoot, 600, 600);
+        },
+        downLabels() {
+            return this.arcs.map(getDownNodeLabel).filter(Boolean);
         },
         /**
          * Text label displayed in the center hole
@@ -388,7 +418,49 @@ export default {
 
     &.is-down path {
         filter: drop-shadow(0 0 4px rgba(220, 38, 38, 0.6));
+        animation: noc-down-pulse 1.6s ease-in-out infinite;
     }
+}
+
+@keyframes noc-down-pulse {
+    0%, 100% {
+        filter: drop-shadow(0 0 4px rgba(220, 38, 38, 0.6));
+    }
+    50% {
+        filter: drop-shadow(0 0 10px rgba(220, 38, 38, 0.95));
+    }
+}
+
+.noc-down-callout {
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.noc-down-line {
+    stroke: #ef4444;
+    stroke-width: 1.5;
+    pointer-events: none;
+}
+
+.noc-down-pointer {
+    fill: #ef4444;
+    pointer-events: none;
+}
+
+.noc-down-text {
+    font-size: 11px;
+    font-weight: 700;
+    pointer-events: none;
+    user-select: none;
+}
+
+.noc-down-host {
+    fill: #f8fafc;
+}
+
+.noc-down-ip {
+    fill: #fca5a5;
+    font-weight: 500;
 }
 
 .noc-circle-hole {
