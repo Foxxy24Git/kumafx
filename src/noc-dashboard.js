@@ -375,8 +375,8 @@ function getInsideDownNodeLabel(arc) {
     return {
         id: arc.id,
         text,
-        x: Math.cos(angle) * r,
-        y: Math.sin(angle) * r,
+        x: Math.sin(angle) * r,
+        y: -Math.cos(angle) * r,
         r,
         rotation,
         monitor: arc.monitor || arc,

@@ -165,13 +165,13 @@ const assert = require("node:assert");
             assert.strictEqual(label.text, "Solok-01");
         });
 
-        it("places the hostname label INSIDE the enlarged down arc with rotation matching arc trajectory", () => {
+        it("places the hostname label INSIDE the enlarged down arc matching SVG arc orientation", () => {
             const arc = {
                 id: 2,
                 type: "monitor",
                 status: "DOWN",
-                startAngle: 0.1,
-                endAngle: 0.5,
+                startAngle: Math.PI / 4,
+                endAngle: Math.PI / 2,
                 innerRadius: 180,
                 outerRadius: 260,
                 monitor: { id: 2, name: "Solok-ATM-01", hostname: "Solok-01" },
@@ -181,8 +181,11 @@ const assert = require("node:assert");
             assert.strictEqual(label.id, 2);
             assert.strictEqual(label.text, "Solok-01");
             assert.ok(label.r > arc.innerRadius && label.r < arc.outerRadius, `Expected label radius ${label.r} between ${arc.innerRadius} and ${arc.outerRadius}`);
-            assert.strictEqual(typeof label.x, "number");
-            assert.strictEqual(typeof label.y, "number");
+            const midArcAngle = (arc.startAngle + arc.endAngle) / 2;
+            const expectedX = -Math.cos(midArcAngle) * label.r;
+            const expectedY = -Math.sin(midArcAngle) * label.r;
+            assert.ok(Math.abs(label.x - expectedX) < 1e-4, `Expected x (${label.x}) to match D3 radial coordinate (${expectedX})`);
+            assert.ok(Math.abs(label.y - expectedY) < 1e-4, `Expected y (${label.y}) to match D3 radial coordinate (${expectedY})`);
             assert.strictEqual(typeof label.rotation, "number");
             assert.strictEqual(getInsideDownNodeLabel({ ...arc, status: "UP" }), null);
         });
