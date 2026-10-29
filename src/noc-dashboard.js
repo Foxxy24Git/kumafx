@@ -349,17 +349,60 @@ function buildPrtgHierarchy(monitorList, heartbeatList = {}, rootName = "All Mon
 }
 
 /**
+ * Check whether a string looks like an IPv4 or IPv6 address.
+ * @param {string} str Value to test.
+ * @returns {boolean} True if the string is an IP address.
+ */
+function isIpAddress(str) {
+    if (!str || typeof str !== "string") {
+        return false;
+    }
+    const trimmed = str.trim();
+    // IPv4 pattern
+    if (/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(trimmed)) {
+        return true;
+    }
+    // IPv6 pattern
+    if (/^[0-9a-fA-F:]+$/.test(trimmed) && trimmed.includes(":")) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Get display label for a monitor node, prioritizing hostname and hiding plain IP addresses.
+ * @param {object} monitor Monitor object or node.
+ * @returns {string} Clean hostname or name string.
+ */
+function getMonitorDisplayHostname(monitor) {
+    if (!monitor) {
+        return "";
+    }
+    const hostname = monitor.hostname || "";
+    if (hostname && !isIpAddress(hostname)) {
+        return hostname;
+    }
+    const host = monitor.host || "";
+    if (host && !isIpAddress(host)) {
+        return host;
+    }
+    return monitor.name || hostname || host || String(monitor.id || "");
+}
+
+/**
  * Compute the inside hostname label position for a DOWN monitor arc.
  * @param {object} arc Rendered arc entry from layoutPrtgSunburst.
  * @returns {object|null} Label geometry or null if not applicable.
  */
 function getInsideDownNodeLabel(arc) {
-    if (!arc || arc.status !== "DOWN" || arc.type !== "monitor") {
+    if (!arc || arc.status !== "DOWN" || !["monitor", "group"].includes(arc.type)) {
         return null;
     }
 
     const monitor = arc.monitor || arc;
-    const hostname = monitor.hostname || monitor.host || monitor.name || String(monitor.id);
+    const hostname = arc.type === "group"
+        ? arc.name || String(arc.id)
+        : getMonitorDisplayHostname(monitor);
     const angle = (arc.startAngle + arc.endAngle) / 2 - Math.PI / 2;
     const r = (arc.innerRadius + arc.outerRadius) / 2;
     const maxCharacters = Math.floor(((arc.endAngle - arc.startAngle) * r - 8) / 6);

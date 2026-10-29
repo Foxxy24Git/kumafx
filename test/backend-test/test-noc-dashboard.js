@@ -315,6 +315,19 @@ const assert = require("node:assert");
             assert.ok(heights.size > 1, "Cells should have varied heights");
         });
 
+        it("labels down monitors by hostname and down groups by name", () => {
+            const source = {
+                1: { id: 1, name: "Grup Jakarta", type: "group" },
+                2: { id: 2, name: "Monitor Jakarta", hostname: "10.0.0.2", type: "ping", parent: 1 },
+                3: { id: 3, name: "Monitor Bandung", hostname: "router.corp.internal", type: "ping", parent: 1 },
+            };
+            const hierarchy = buildPrtgHierarchy(source, { 2: { status: 0 }, 3: { status: 0 } });
+            const arcs = layoutPrtgSunburst(hierarchy, 600, 600);
+            const labels = arcs.map(getInsideDownNodeLabel).filter(Boolean);
+
+            assert.deepStrictEqual(labels.map(label => label.text).sort(), ["Grup Jakarta", "Monitor Jakarta", "router.corp.internal"]);
+        });
+
         it("maps live Kuma records to safe ATM statuses and fallback fields", () => {
             const source = {
                 1: { id: 1, name: "Region", type: "group" },
