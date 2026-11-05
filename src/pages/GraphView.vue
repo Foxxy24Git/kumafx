@@ -11,13 +11,18 @@
                     @click="isPanelCollapsed = !isPanelCollapsed"
                 >
                     <div class="d-flex align-items-center gap-2">
-                        <font-awesome-icon icon="filter" class="text-primary" />
-                        <span class="noc-panel-title">Kontrol Topologi</span>
+                        <span class="noc-panel-badge-icon">
+                            <font-awesome-icon icon="filter" />
+                        </span>
+                        <div>
+                            <div class="noc-panel-title">Kontrol Topologi</div>
+                            <div v-if="!isPanelCollapsed" class="noc-panel-subtitle">Parameter & Filter Tampilan</div>
+                        </div>
                     </div>
-                    <div class="d-flex align-items-center gap-2 ms-2">
+                    <div class="d-flex align-items-center gap-1 ms-2">
                         <button
                             type="button"
-                            class="btn btn-sm btn-link text-decoration-none p-0 noc-panel-fullscreen"
+                            class="btn btn-sm btn-link text-decoration-none p-1 noc-panel-icon-btn"
                             :title="isFullscreen ? 'Keluar Full Screen' : 'Full Screen'"
                             :aria-label="isFullscreen ? 'Keluar Full Screen' : 'Full Screen'"
                             @click.stop="toggleFullscreen"
@@ -26,153 +31,168 @@
                         </button>
                         <button
                             type="button"
-                            class="btn btn-sm btn-link text-decoration-none p-0 noc-panel-toggle"
+                            class="btn btn-sm btn-link text-decoration-none p-1 noc-panel-icon-btn noc-panel-toggle"
+                            :title="isPanelCollapsed ? 'Buka Panel' : 'Tutup Panel'"
                             @click.stop="isPanelCollapsed = !isPanelCollapsed"
                         >
-                            <span v-if="isPanelCollapsed" class="text-primary fw-semibold">Buka ▾</span>
-                            <span v-else class="text-secondary">Tutup ▴</span>
+                            <span v-if="isPanelCollapsed" class="noc-toggle-text text-primary">Buka ▾</span>
+                            <span v-else class="noc-toggle-text text-secondary">Tutup ▴</span>
                         </button>
                     </div>
                 </div>
 
                 <div v-if="!isPanelCollapsed" class="noc-panel-content d-flex flex-column gap-3">
                     <!-- Search Input -->
-                    <div>
-                        <label class="form-label small fw-bold mb-1">Cari Perangkat / Wilayah:</label>
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text">
+                    <div class="noc-control-group">
+                        <label class="form-label small noc-label mb-1.5">Pencarian Node</label>
+                        <div class="input-group input-group-sm noc-input-group">
+                            <span class="input-group-text noc-input-icon">
                                 <font-awesome-icon icon="search" />
                             </span>
                             <input
                                 v-model="searchQuery"
                                 type="text"
                                 class="form-control"
-                                placeholder="Ketik ATM-..., KC-..., atau IP..."
+                                placeholder="Nama, hostname, atau IP..."
                                 @keyup.enter="focusSearchedNode"
                             />
-                            <button v-if="searchQuery" class="btn btn-outline-secondary" type="button" @click="searchQuery = ''">
+                            <button v-if="searchQuery" class="btn btn-outline-secondary noc-btn-clear" type="button" @click="searchQuery = ''">
                                 &times;
                             </button>
                         </div>
-                        <div v-if="searchQuery && matchedNodeCount > 0" class="text-primary small mt-1 font-mono">
-                            Ditemukan {{ matchedNodeCount }} node.
+                        <div v-if="searchQuery && matchedNodeCount > 0" class="noc-match-badge mt-1.5">
+                            <span class="noc-match-dot"></span>
+                            <span>Ditemukan {{ matchedNodeCount }} node relevan</span>
                         </div>
                     </div>
 
                     <!-- Filter Grup Wilayah -->
-                    <div>
-                        <label class="form-label small fw-bold mb-1">Grup Wilayah / Cabang:</label>
-                        <select v-model="selectedGroup" class="form-select form-select-sm">
+                    <div class="noc-control-group">
+                        <label class="form-label small noc-label mb-1.5">Filter Wilayah</label>
+                        <select v-model="selectedGroup" class="form-select form-select-sm noc-select">
                             <option value="ALL">Semua Wilayah ({{ availableGroups.length }} Grup)</option>
                             <option v-for="g in availableGroups" :key="g" :value="g">{{ g }}</option>
                         </select>
                     </div>
 
                     <!-- Filter Status -->
-                    <div>
-                        <label class="form-label small fw-bold mb-1">Filter Status:</label>
-                        <div class="btn-group btn-group-sm w-100 noc-status-btn-group" role="group">
+                    <div class="noc-control-group">
+                        <label class="form-label small noc-label mb-1.5">Status Operasional</label>
+                        <div class="noc-status-segmented" role="group" aria-label="Filter status operasional">
                             <button
                                 type="button"
-                                class="btn"
-                                :class="statusFilter === 'ALL' ? 'btn-primary active' : 'btn-outline-normal'"
+                                class="noc-segmented-btn"
+                                :class="{ 'is-active': statusFilter === 'ALL' }"
                                 @click="statusFilter = 'ALL'"
                             >
-                                Semua
+                                <span>Semua</span>
                             </button>
                             <button
                                 type="button"
-                                class="btn"
-                                :class="statusFilter === 'ISSUE' ? 'btn-warning active' : 'btn-outline-normal'"
+                                class="noc-segmented-btn is-warning"
+                                :class="{ 'is-active': statusFilter === 'ISSUE' }"
                                 @click="statusFilter = 'ISSUE'"
                             >
-                                DOWN + WARNING ({{ stats.down + stats.slow }})
+                                <span class="noc-status-indicator warning"></span>
+                                <span>Issue ({{ stats.down + stats.slow }})</span>
                             </button>
                             <button
                                 type="button"
-                                class="btn"
-                                :class="statusFilter === 'DOWN' ? 'btn-danger active' : 'btn-outline-normal'"
+                                class="noc-segmented-btn is-danger"
+                                :class="{ 'is-active': statusFilter === 'DOWN' }"
                                 @click="statusFilter = 'DOWN'"
                             >
-                                DOWN ({{ stats.down }})
+                                <span class="noc-status-indicator danger"></span>
+                                <span>Down ({{ stats.down }})</span>
                             </button>
                         </div>
                     </div>
 
                     <!-- Filter Tipe Node -->
-                    <div>
-                        <label class="form-label small fw-bold mb-1">Tipe Node Tampil:</label>
-                        <div class="d-flex flex-wrap gap-3 small">
-                            <label class="form-check d-flex align-items-center gap-1 cursor-pointer mb-0">
-                                <input v-model="showGroups" type="checkbox" class="form-check-input mt-0" />
+                    <div class="noc-control-group">
+                        <label class="form-label small noc-label mb-1.5">Visibilitas Node</label>
+                        <div class="noc-chip-group">
+                            <label class="noc-chip" :class="{ 'is-active': showGroups }">
+                                <input v-model="showGroups" type="checkbox" class="noc-chip-input" />
+                                <span class="noc-chip-dot group"></span>
                                 <span>Grup</span>
                             </label>
-                            <label class="form-check d-flex align-items-center gap-1 cursor-pointer mb-0">
-                                <input v-model="showAtm" type="checkbox" class="form-check-input mt-0" />
+                            <label class="noc-chip" :class="{ 'is-active': showAtm }">
+                                <input v-model="showAtm" type="checkbox" class="noc-chip-input" />
+                                <span class="noc-chip-dot atm"></span>
                                 <span>ATM</span>
                             </label>
-                            <label class="form-check d-flex align-items-center gap-1 cursor-pointer mb-0">
-                                <input v-model="showKantor" type="checkbox" class="form-check-input mt-0" />
+                            <label class="noc-chip" :class="{ 'is-active': showKantor }">
+                                <input v-model="showKantor" type="checkbox" class="noc-chip-input" />
+                                <span class="noc-chip-dot kantor"></span>
                                 <span>Kantor</span>
                             </label>
-                            <label class="form-check d-flex align-items-center gap-1 cursor-pointer mb-0">
-                                <input v-model="showBackup" type="checkbox" class="form-check-input mt-0" />
+                            <label class="noc-chip" :class="{ 'is-active': showBackup }">
+                                <input v-model="showBackup" type="checkbox" class="noc-chip-input" />
+                                <span class="noc-chip-dot backup"></span>
                                 <span>Backup</span>
                             </label>
                         </div>
                     </div>
 
                     <!-- Physics & Animation Toggles -->
-                    <div class="noc-section-divider pt-2">
-                        <div class="d-flex align-items-center justify-content-between mb-2">
-                            <span class="small">Animasi Partikel Flow:</span>
+                    <div class="noc-section-divider pt-3">
+                        <div class="noc-switch-row">
+                            <span class="noc-switch-label">Aliran Partikel</span>
                             <div class="form-check form-switch mb-0">
                                 <input v-model="enableParticles" class="form-check-input" type="checkbox" />
                             </div>
                         </div>
 
-                        <div class="d-flex align-items-center justify-content-between mb-2">
-                            <span class="small">Tampilkan Semua Label:</span>
+                        <div class="noc-switch-row">
+                            <span class="noc-switch-label">Label Permanen</span>
                             <div class="form-check form-switch mb-0">
                                 <input v-model="alwaysShowLabels" class="form-check-input" type="checkbox" />
                             </div>
                         </div>
 
-                        <div class="d-flex align-items-center justify-content-between mb-2">
-                            <span class="small">Simulasi Fisika Aktif:</span>
+                        <div class="noc-switch-row">
+                            <span class="noc-switch-label">Panel Notifikasi Down</span>
+                            <div class="form-check form-switch mb-0">
+                                <input v-model="showDownAlerts" class="form-check-input" type="checkbox" />
+                            </div>
+                        </div>
+
+                        <div class="noc-switch-row">
+                            <span class="noc-switch-label">Simulasi Grafis</span>
                             <div class="form-check form-switch mb-0">
                                 <input v-model="isPhysicsActive" class="form-check-input" type="checkbox" />
                             </div>
                         </div>
 
-                        <div class="noc-physics-status small font-mono mb-2" :class="physicsStatusClass">
+                        <div class="noc-physics-status font-mono mt-2" :class="physicsStatusClass">
                             <div class="d-flex align-items-center justify-content-between">
-                                <span class="text-secondary">MODE FISIKA</span>
-                                <span class="fw-bold text-primary">{{ physicsModeLabel }}</span>
+                                <span class="text-secondary small">MODE SIMULASI</span>
+                                <span class="badge noc-mode-pill">{{ physicsModeLabel }}</span>
                             </div>
-                            <div class="mt-1 text-secondary">
+                            <div class="mt-1 text-secondary noc-physics-detail">
                                 {{ physicsStatusDetail }}
                             </div>
                             <div class="d-flex align-items-center gap-2 mt-2 pt-2 border-top border-secondary-subtle" aria-label="Monitoring heartbeat realtime aktif">
                                 <span class="noc-live-heartbeat-dot" aria-hidden="true"></span>
-                                <span class="fw-bold text-primary">LIVE HEARTBEAT</span>
+                                <span class="fw-bold text-primary font-sans small">LIVE HEARTBEAT</span>
                             </div>
                         </div>
 
-                        <div class="mt-2">
-                            <div class="d-flex justify-content-between text-secondary small">
-                                <span>Jarak Pegas Link:</span>
-                                <span class="font-mono text-primary">{{ linkDistance }}px</span>
+                        <div class="noc-range-block mt-3">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="noc-switch-label">Jarak Antar Node</span>
+                                <span class="badge bg-dark-subtle text-primary border border-primary-subtle font-mono">{{ linkDistance }}px</span>
                             </div>
-                            <input v-model.number="linkDistance" type="range" class="form-range" min="30" max="180" step="5" />
+                            <input v-model.number="linkDistance" type="range" class="form-range noc-slider" min="30" max="180" step="5" />
                         </div>
                     </div>
 
-                    <div class="d-flex gap-2 noc-section-divider pt-2">
-                        <button type="button" class="btn btn-sm btn-outline-normal w-50" title="Reset Posisi Kamera" @click="resetCamera">
+                    <div class="d-flex gap-2 noc-section-divider pt-3">
+                        <button type="button" class="btn btn-sm noc-btn-secondary w-50" title="Reset Posisi Kamera" @click="resetCamera">
                             Reset View
                         </button>
-                        <button type="button" class="btn btn-sm btn-primary w-50" title="Susun Ulang Posisi Node" @click="resetLayout">
+                        <button type="button" class="btn btn-sm noc-btn-primary w-50" title="Susun Ulang Posisi Node" @click="resetLayout">
                             Reset Layout
                         </button>
                     </div>
@@ -217,6 +237,48 @@
                     </div>
                 </div>
             </div>
+
+            <!-- POPUP NODE DOWN PANEL (LEFT SIDE) -->
+            <transition name="noc-slide-fade">
+                <aside
+                    v-if="showDownAlerts && downNodes.length > 0"
+                    class="noc-down-alert-panel shadow-box"
+                    aria-label="Daftar node down"
+                    @wheel.stop
+                >
+                    <div class="noc-down-alert-header d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="noc-down-alert-pulse" aria-hidden="true"></span>
+                            <span class="fw-bold font-sans text-light">Node Down</span>
+                        </div>
+                        <span class="badge bg-danger rounded-pill font-mono">{{ downNodes.length }}</span>
+                    </div>
+
+                    <div class="noc-down-alert-list">
+                        <button
+                            v-for="item in downNodes"
+                            :key="item.id"
+                            type="button"
+                            class="noc-down-alert-item"
+                            :title="`Klik untuk fokus ke ${item.name}`"
+                            @click="focusNode(item.id)"
+                        >
+                            <span class="noc-down-alert-dot" aria-hidden="true"></span>
+                            <div class="noc-down-alert-info">
+                                <div class="noc-down-alert-name text-truncate">{{ item.name }}</div>
+                                <div class="noc-down-alert-meta font-mono">
+                                    <span class="text-secondary">IP:</span>
+                                    <span class="text-light ms-1">{{ item.ip }}</span>
+                                </div>
+                                <div class="noc-down-alert-meta font-mono">
+                                    <span class="text-secondary">Tag:</span>
+                                    <span class="badge bg-secondary-subtle text-info border border-info-subtle ms-1 py-0 px-1">{{ item.tag }}</span>
+                                </div>
+                            </div>
+                        </button>
+                    </div>
+                </aside>
+            </transition>
 
             <!-- HOVER TOOLTIP CARD -->
             <div
@@ -266,6 +328,7 @@ import {
     reheatSimulationNodes,
     collectHostTags,
     buildLinkParticles,
+    extractDownNodes,
 } from "../noc-graph-cluster";
 
 const TAG_POSITION_STORAGE_KEY = "uptime-kuma-graph-tag-positions";
@@ -287,6 +350,7 @@ export default {
             showBackup: true,
             enableParticles: true,
             alwaysShowLabels: false,
+            showDownAlerts: true,
             isPhysicsActive: true,
             isPhysicsSleeping: false,
             physicsStableFrames: 0,
@@ -448,6 +512,12 @@ export default {
             });
 
             return { up, slow, down, atm, kantor, backup, group };
+        },
+
+
+        downNodes() {
+            void this.liveTick;
+            return extractDownNodes(this.nodes);
         },
     },
     watch: {
@@ -943,6 +1013,19 @@ export default {
                 this.camera.y = (rect.height / 2) - (found.y * 1.5);
                 this.camera.scale = 1.5;
                 this.hoveredNode = found;
+            }
+        },
+
+        focusNode(nodeId) {
+            const found = this.nodes.find(n => n.id === nodeId);
+            const canvas = this.$refs.canvas;
+            if (found && canvas) {
+                const rect = canvas.getBoundingClientRect();
+                this.camera.x = (rect.width / 2) - (found.x * 1.5);
+                this.camera.y = (rect.height / 2) - (found.y * 1.5);
+                this.camera.scale = 1.5;
+                this.hoveredNode = found;
+                this.triggerMicroReheat(found);
             }
         },
 
@@ -1586,12 +1669,13 @@ export default {
     display: flex;
     flex-direction: column;
     padding: 0;
-    background-color: #0d1117;
+    background: rgba(13, 18, 27, 0.94);
     color: #b1b8c0;
-    border: 1px solid #1d2634;
-    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 14px;
     z-index: 10;
-    box-shadow: 0 15px 70px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 20px 70px rgba(0, 0, 0, 0.52), 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+    backdrop-filter: blur(18px);
     transition: width 0.2s ease;
     overflow: hidden;
 }
@@ -1601,35 +1685,68 @@ export default {
 }
 
 .noc-panel-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid #1d2634;
+    min-height: 66px;
+    padding: 13px 15px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .panel-collapsed .noc-panel-header {
     border-bottom: 0;
 }
 
+.noc-panel-badge-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    color: #80d7ff;
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    border-radius: 8px;
+}
+
 .noc-panel-title {
     font-weight: bold;
-    color: #f0f6fc;
+    color: #f3f7fb;
+    font-size: 0.91rem;
+    letter-spacing: 0.01em;
     white-space: nowrap;
 }
 
-.noc-panel-fullscreen {
-    min-width: 20px;
+.noc-panel-subtitle {
+    margin-top: 2px;
+    color: #738298;
+    font-size: 0.67rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.noc-panel-fullscreen,
+.noc-panel-icon-btn {
+    min-width: 28px;
     line-height: 1.2;
-    color: #b1b8c0;
+    color: #8a99ab;
+    border-radius: 6px;
 }
 
 .noc-panel-fullscreen:hover,
-.noc-panel-fullscreen:focus-visible {
-    color: #5cdd8b;
+.noc-panel-fullscreen:focus-visible,
+.noc-panel-icon-btn:hover,
+.noc-panel-icon-btn:focus-visible {
+    color: #c9f0ff;
+    background: rgba(148, 163, 184, 0.09);
 }
 
 .noc-panel-toggle {
     min-width: 42px;
     padding: 0;
     line-height: 1.2;
+}
+
+.noc-toggle-text {
+    font-size: 0.68rem;
+    letter-spacing: 0.03em;
 }
 
 .noc-section-divider {
@@ -1717,11 +1834,10 @@ export default {
 }
 
 .noc-physics-status {
-    background-color: #070a10;
-    border: 1px solid #1d2634;
-    border-radius: 10px;
-    padding: 8px 10px;
-    font-size: 11px;
+    padding: 10px 11px;
+    background: rgba(4, 8, 14, 0.62);
+    border: 1px solid rgba(148, 163, 184, 0.13);
+    border-radius: 9px;
 }
 
 .noc-live-heartbeat-dot {
@@ -1758,7 +1874,8 @@ export default {
     flex: 1;
     min-height: 0;
     max-height: calc(100vh - 170px);
-    padding: 1rem;
+    gap: 17px !important;
+    padding: 17px 15px 15px;
     overscroll-behavior: contain;
 }
 
@@ -1844,7 +1961,416 @@ export default {
     font-size: 0.8rem;
 }
 
+/* POPUP NODE DOWN (LEFT SIDE) */
+.noc-down-alert-panel {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    width: 290px;
+    max-width: calc(100% - 40px);
+    max-height: calc(100% - 100px);
+    display: flex;
+    flex-direction: column;
+    background: rgba(13, 17, 23, 0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-left: 4px solid #ef4444;
+    border-radius: 10px;
+    z-index: 15;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 20px rgba(239, 68, 68, 0.15);
+    overflow: hidden;
+}
+
+.noc-down-alert-header {
+    padding: 10px 14px;
+    background: rgba(239, 68, 68, 0.08);
+    border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+    font-size: 0.85rem;
+}
+
+.noc-down-alert-pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #ef4444;
+    box-shadow: 0 0 8px #ef4444;
+    animation: noc-down-pulse 1.4s infinite ease-in-out;
+}
+
+@keyframes noc-down-pulse {
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        transform: scale(1.3);
+        opacity: 0.45;
+    }
+}
+
+.noc-down-alert-list {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.noc-down-alert-item {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: inherit;
+    text-align: left;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.noc-down-alert-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(239, 68, 68, 0.3);
+    transform: translateX(2px);
+}
+
+.noc-down-alert-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ef4444;
+    margin-top: 5px;
+    flex-shrink: 0;
+}
+
+.noc-down-alert-info {
+    min-width: 0;
+    flex: 1;
+}
+
+.noc-down-alert-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #f87171;
+    margin-bottom: 2px;
+}
+
+.noc-down-alert-meta {
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+/* Transisi fade slide masuk/keluar */
+.noc-slide-fade-enter-active,
+.noc-slide-fade-leave-active {
+    transition: all 0.25s ease-out;
+}
+
+.noc-slide-fade-enter-from,
+.noc-slide-fade-leave-to {
+    transform: translateX(-16px);
+    opacity: 0;
+}
+
+@media (max-width: 768px) {
+    .noc-down-alert-panel {
+        top: 10px;
+        left: 10px;
+        width: 250px;
+        max-height: 40vh;
+    }
+}
+
 .cursor-pointer {
     cursor: pointer;
+}
+
+.noc-panel-icon-btn {
+    min-width: 28px;
+    color: #8a99ab;
+    border-radius: 6px;
+}
+
+.noc-panel-icon-btn:hover,
+.noc-panel-icon-btn:focus-visible {
+    color: #c9f0ff;
+    background: rgba(148, 163, 184, 0.09);
+}
+
+
+.noc-label {
+    display: block;
+    color: #a7b5c7;
+    font-size: 0.69rem;
+    font-weight: 600;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+}
+
+.noc-input-group,
+.noc-select {
+    border-radius: 8px;
+}
+
+.noc-input-group .form-control,
+.noc-select {
+    min-height: 35px;
+    color: #dce7f1;
+    background: rgba(4, 8, 14, 0.72);
+    border-color: rgba(148, 163, 184, 0.18);
+    font-size: 0.77rem;
+}
+
+.noc-input-group .form-control:focus,
+.noc-select:focus {
+    border-color: rgba(56, 189, 248, 0.7);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.11);
+}
+
+.noc-input-icon {
+    min-width: 35px;
+    justify-content: center;
+    color: #7eabc0;
+    background: rgba(56, 189, 248, 0.07);
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+.noc-btn-clear {
+    color: #8190a2;
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+.noc-match-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #82d8a5;
+    font-size: 0.68rem;
+}
+
+.noc-match-dot {
+    width: 5px;
+    height: 5px;
+    background: #5cdd8b;
+    border-radius: 50%;
+    box-shadow: 0 0 6px rgba(92, 221, 139, 0.7);
+}
+
+.noc-status-segmented {
+    display: grid;
+    grid-template-columns: 0.72fr 1.25fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    background: rgba(3, 7, 12, 0.78);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 9px;
+}
+
+.noc-segmented-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 0;
+    padding: 7px 4px;
+    color: #8290a1;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.noc-segmented-btn:hover {
+    color: #dce7f1;
+    background: rgba(148, 163, 184, 0.08);
+}
+
+.noc-segmented-btn.is-active {
+    color: #dff6ff;
+    background: rgba(56, 189, 248, 0.16);
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.26) inset;
+}
+
+.noc-segmented-btn.is-warning.is-active {
+    color: #fcd58a;
+    background: rgba(245, 158, 11, 0.13);
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25) inset;
+}
+
+.noc-segmented-btn.is-danger.is-active {
+    color: #ffb2b2;
+    background: rgba(239, 68, 68, 0.13);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25) inset;
+}
+
+.noc-status-indicator {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+}
+
+.noc-status-indicator.warning {
+    background: #f59e0b;
+}
+
+.noc-status-indicator.danger {
+    background: #ef4444;
+    box-shadow: 0 0 5px rgba(239, 68, 68, 0.65);
+}
+
+.noc-chip-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.noc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 9px;
+    color: #8795a7;
+    background: rgba(148, 163, 184, 0.045);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 0.69rem;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.noc-chip:hover,
+.noc-chip.is-active {
+    color: #dce7f1;
+    background: rgba(148, 163, 184, 0.1);
+    border-color: rgba(148, 163, 184, 0.32);
+}
+
+.noc-chip-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.noc-chip-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+
+.noc-chip-dot.group {
+    background: #38bdf8;
+}
+
+.noc-chip-dot.atm {
+    background: #22c55e;
+}
+
+.noc-chip-dot.kantor {
+    background: #8b5cf6;
+}
+
+.noc-chip-dot.backup {
+    background: #f59e0b;
+}
+
+.noc-switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 31px;
+    color: #b7c3d1;
+}
+
+.noc-switch-label {
+    color: #aebaca;
+    font-size: 0.75rem;
+}
+
+.noc-floating-panel .form-switch .form-check-input {
+    width: 2.05em;
+    height: 1.08em;
+    margin-left: 0;
+    background-color: #202a36;
+    border-color: rgba(148, 163, 184, 0.22);
+}
+
+.noc-floating-panel .form-switch .form-check-input:checked {
+    background-color: #38bdf8;
+    border-color: #38bdf8;
+}
+
+.noc-mode-pill {
+    color: #9be4ff;
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    font-size: 0.61rem;
+    letter-spacing: 0.04em;
+}
+
+.noc-physics-detail {
+    font-size: 0.66rem;
+    line-height: 1.45;
+}
+
+.noc-range-block {
+    padding-top: 2px;
+}
+
+.noc-slider::-webkit-slider-thumb,
+.noc-slider::-moz-range-thumb {
+    background-color: #65c9ee;
+}
+
+.noc-btn-secondary,
+.noc-btn-primary {
+    min-height: 34px;
+    border-radius: 7px;
+    font-size: 0.71rem;
+    letter-spacing: 0.02em;
+}
+
+.noc-btn-secondary {
+    color: #aebaca;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.04);
+}
+
+.noc-btn-secondary:hover {
+    color: #e5edf5;
+    background: rgba(148, 163, 184, 0.11);
+}
+
+.noc-btn-primary {
+    color: #06202b;
+    background: #65c9ee;
+    border-color: #65c9ee;
+}
+
+.noc-btn-primary:hover {
+    color: #03151c;
+    background: #8bdafa;
+    border-color: #8bdafa;
+}
+
+@media (max-width: 520px) {
+    .noc-floating-panel {
+        right: 10px;
+        width: min(320px, calc(100% - 20px));
+    }
+
+    .noc-status-segmented {
+        grid-template-columns: 1fr;
+    }
+
+    .noc-segmented-btn {
+        min-height: 28px;
+    }
 }
 </style>

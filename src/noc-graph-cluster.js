@@ -676,3 +676,26 @@ export function applyLeafClusterGravity(nodes, strength = 0.0005) {
         node.vy -= node.y * strength;
     });
 }
+
+/**
+ * Extracts down nodes and maps their identification data for UI alert displays.
+ * @param {Array<object>} nodes List of graph nodes.
+ * @returns {Array<object>} Mapped list of down nodes containing id, name, ip, and tag.
+ */
+export function extractDownNodes(nodes) {
+    if (!Array.isArray(nodes)) {
+        return [];
+    }
+
+    return nodes
+        .filter((node) => Boolean(node && node.status === "down"))
+        .map((node) => {
+            const rawTag = node.tag || (Array.isArray(node.tags) && node.tags.length > 0 ? node.tags[0] : "");
+            return {
+                id: node.id,
+                name: node.label || node.name || "Unknown Node",
+                ip: node.hostname || node.ip || "-",
+                tag: rawTag || "Tanpa tag",
+            };
+        });
+}
