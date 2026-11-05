@@ -1,10 +1,29 @@
 <template>
     <div class="geomap-page">
-        <div class="geomap-content">
+        <div class="geomap-content" :class="{ 'geomap-sidebar-collapsed': sidebarCollapsed }">
             <aside class="geomap-sidebar">
                 <MonitorList :scrollbar="true" :on-monitor-click="focusMonitor" />
             </aside>
-            <div ref="map" class="geomap"></div>
+            <button
+                class="geomap-sidebar-toggle"
+                type="button"
+                :aria-label="sidebarCollapsed ? 'Tampilkan daftar monitor' : 'Sembunyikan daftar monitor'"
+                :title="sidebarCollapsed ? 'Tampilkan daftar monitor' : 'Sembunyikan daftar monitor'"
+                @click="toggleSidebar"
+            >
+                {{ sidebarCollapsed ? ">" : "<" }}
+            </button>
+            <div ref="map" class="geomap">
+                <button
+                    class="geomap-fullscreen-toggle"
+                    type="button"
+                    :aria-label="isFullscreen ? 'Keluar dari layar penuh' : 'Tampilkan peta layar penuh'"
+                    :title="isFullscreen ? 'Keluar dari layar penuh' : 'Tampilkan peta layar penuh'"
+                    @click.stop="toggleFullscreen"
+                >
+                    {{ isFullscreen ? "⤢" : "⛶" }}
+                </button>
+            </div>
         </div>
     </div>
 </template>
@@ -39,6 +58,8 @@ export default {
             search: "",
             statusFilter: "ALL",
             groupFilter: "ALL",
+            sidebarCollapsed: false,
+            isFullscreen: false,
         };
     },
     computed: {
@@ -105,8 +126,11 @@ export default {
         });
         this.map.addLayer(this.cluster);
         this.renderMarkers();
+
+        document.addEventListener("fullscreenchange", this.handleFullscreenChange);
     },
     beforeUnmount() {
+        document.removeEventListener("fullscreenchange", this.handleFullscreenChange);
         if (this.map) {
             this.map.remove();
         }
@@ -224,6 +248,33 @@ export default {
                 marker.openPopup();
             }
         },
+        toggleSidebar() {
+            this.sidebarCollapsed = !this.sidebarCollapsed;
+            this.$nextTick(() => {
+                setTimeout(() => {
+                    if (this.map) {
+                        this.map.invalidateSize();
+                    }
+                }, 220);
+            });
+        },
+        toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                this.$refs.map.requestFullscreen().catch(() => {
+                    this.$root.toastError("Browser tidak mendukung mode layar penuh");
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        },
+        handleFullscreenChange() {
+            this.isFullscreen = document.fullscreenElement === this.$refs.map;
+            this.$nextTick(() => {
+                if (this.map) {
+                    this.map.invalidateSize();
+                }
+            });
+        },
         escape(value) {
             return String(value).replace(/[&<>"']/g, (char) => {
                 const map = {
@@ -284,6 +335,33 @@ export default {
     min-width: 0;
 }
 
+.geomap:fullscreen {
+    width: 100vw;
+    height: 100vh;
+}
+
+.geomap-fullscreen-toggle {
+    position: absolute;
+    z-index: 1000;
+    top: 80px;
+    left: 10px;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 2px solid rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    font-size: 20px;
+    line-height: 30px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.geomap-fullscreen-toggle:hover {
+    background: #f4f4f4;
+}
+
 .geomap-sidebar {
     width: 480px;
     max-width: 45vw;
@@ -294,6 +372,41 @@ export default {
     overflow: hidden;
     background-color: var(--bs-body-bg);
     border-right: 1px solid rgba(255, 255, 255, 0.08);
+    transition: width 200ms ease, max-width 200ms ease, padding 200ms ease;
+}
+
+.geomap-sidebar-collapsed .geomap-sidebar {
+    width: 0;
+    max-width: 0;
+    padding: 0;
+    border: 0;
+}
+
+.geomap-sidebar-toggle {
+    position: absolute;
+    z-index: 1000;
+    left: 480px;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 28px;
+    height: 48px;
+    padding: 0;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0 6px 6px 0;
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    cursor: pointer;
+    transition: left 200ms ease;
+}
+
+.geomap-sidebar-collapsed .geomap-sidebar-toggle {
+    left: 14px;
+}
+
+@media (max-width: 1066px) and (min-width: 992px) {
+    .geomap-sidebar-toggle {
+        left: 45vw;
+    }
 }
 
 .geomap-sidebar .shadow-box {
@@ -314,10 +427,37 @@ export default {
         height: 45%;
         border-right: none;
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        transition: height 200ms ease, padding 200ms ease;
+    }
+
+    .geomap-sidebar-collapsed .geomap-sidebar {
+        width: 100%;
+        max-width: 100%;
+        height: 0;
+        padding: 0;
+        border: 0;
+    }
+
+    .geomap-sidebar-toggle {
+        left: 50%;
+        top: 45%;
+        transform: translate(-50%, -50%);
+        width: 48px;
+        height: 24px;
+        border-radius: 0 0 6px 6px;
+    }
+
+    .geomap-sidebar-collapsed .geomap-sidebar-toggle {
+        left: 50%;
+        top: 12px;
     }
 
     .geomap {
         height: 55%;
+    }
+
+    .geomap-sidebar-collapsed .geomap {
+        height: 100%;
     }
 }
 </style>

@@ -555,7 +555,16 @@ class Database {
      */
     static createAuthDatabase(dbConfig) {
         let database;
-        if (dbConfig.type.includes("mariadb")) {
+        if (dbConfig.type === "embedded-mariadb") {
+            let embeddedMariaDB = EmbeddedMariaDB.getInstance();
+            database = mysql.createPool({
+                socketPath: embeddedMariaDB.socketPath,
+                user: embeddedMariaDB.username,
+                database: "kuma",
+                timezone: "Z",
+            });
+            Database.authMariaDB = database;
+        } else if (dbConfig.type.includes("mariadb")) {
             database = mysql.createPool({
                 host: dbConfig.hostname,
                 port: Number(dbConfig.port),
@@ -564,15 +573,6 @@ class Database {
                 password: dbConfig.password,
                 timezone: "Z",
                 ...(dbConfig.socketPath ? { socketPath: dbConfig.socketPath } : {}),
-            });
-            Database.authMariaDB = database;
-        } else if (dbConfig.type === "embedded-mariadb") {
-            let embeddedMariaDB = EmbeddedMariaDB.getInstance();
-            database = mysql.createPool({
-                socketPath: embeddedMariaDB.socketPath,
-                user: embeddedMariaDB.username,
-                database: "kuma",
-                timezone: "Z",
             });
             Database.authMariaDB = database;
         } else {

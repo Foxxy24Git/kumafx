@@ -83,10 +83,10 @@
                             <button
                                 type="button"
                                 class="btn"
-                                :class="statusFilter === 'UP' ? 'btn-primary active' : 'btn-outline-normal'"
-                                @click="statusFilter = 'UP'"
+                                :class="statusFilter === 'ISSUE' ? 'btn-warning active' : 'btn-outline-normal'"
+                                @click="statusFilter = 'ISSUE'"
                             >
-                                UP ({{ stats.up }})
+                                DOWN + WARNING ({{ stats.down + stats.slow }})
                             </button>
                             <button
                                 type="button"
@@ -761,7 +761,14 @@ export default {
                 }
                 const beat = this.getBeat(m.id);
                 const isDown = beat && beat.status === DOWN;
-                return !(this.statusFilter === "UP" && isDown) && !(this.statusFilter === "DOWN" && !isDown);
+                const isWarning = !isDown && beat && beat.ping > 150;
+                if (this.statusFilter === "DOWN") {
+                    return isDown;
+                }
+                if (this.statusFilter === "ISSUE") {
+                    return isDown || isWarning;
+                }
+                return true;
             });
             const nodes = visible.map((monitor, index) => {
                 const existing = existingNodeMap.get(`MON_${monitor.id}`);
@@ -1096,7 +1103,7 @@ export default {
                 ctx.lineTo(tgt.x, tgt.y);
 
                 if (link.isTagLink && tgt.status === "down") {
-                    ctx.setLineDash([]);
+                    ctx.setLineDash([4, 4]);
                     ctx.strokeStyle = `rgba(239, 68, 68, ${Math.min(alpha * 2.4, 0.9)})`;
                     ctx.lineWidth = isConnected ? 2.5 : 1.6;
                 } else if (link.isTagLink) {
