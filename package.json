@@ -108,6 +108,8 @@
         "jsonata": "~2.2.2",
         "kafkajs": "~2.2.4",
         "knex": "~3.3.0",
+        "leaflet": "^1.9.4",
+        "leaflet.markercluster": "^1.5.3",
         "limiter": "~2.1.0",
         "liquidjs": "~10.29.0",
         "marked": "~14.1.4",

@@ -11,6 +11,7 @@ import List from "./pages/List.vue";
 import Topology from "./pages/Topology.vue";
 import GraphView from "./pages/GraphView.vue";
 import NocDashboard from "./pages/NocDashboard.vue";
+import NocGeoMap from "./pages/NocGeoMap.vue";
 const Settings = () => import("./pages/Settings.vue");
 import Setup from "./pages/Setup.vue";
 import StatusPage from "./pages/StatusPage.vue";
@@ -179,6 +180,11 @@ const routes = [
                 name: "NocDashboard",
                 path: "/noc-dashboard",
                 component: NocDashboard,
+            },
+            {
+                name: "NocGeoMap",
+                path: "/noc-geomap",
+                component: NocGeoMap,
             },
         ],
     },

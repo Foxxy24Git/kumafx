@@ -57,6 +57,12 @@
                         NOC Dashboard
                     </router-link>
                 </li>
+                <li v-if="$root.loggedIn" class="nav-item me-2">
+                    <router-link to="/noc-geomap" class="nav-link">
+                        <font-awesome-icon icon="map-marked-alt" />
+                        Geo MAP
+                    </router-link>
+                </li>
                 <li v-if="$root.loggedIn" class="nav-item">
                     <div class="dropdown dropdown-profile-pic">
                         <div class="nav-link" data-bs-toggle="dropdown">
@@ -83,10 +89,21 @@
 
                             <li><hr class="dropdown-divider" /></li>
 
-                            <!-- Functions -->
-                            <li>
-                                <router-link
-                                    to="/maintenance"
+            <li>
+                <router-link
+                    to="/noc-geomap"
+                    class="dropdown-item"
+                    :class="{ active: $route.path === '/noc-geomap' }"
+                >
+                    <font-awesome-icon icon="map-marked-alt" />
+                    Geo MAP
+                </router-link>
+            </li>
+
+            <!-- Functions -->
+            <li>
+                <router-link
+                    to="/maintenance"
                                     class="dropdown-item"
                                     :class="{ active: $route.path.includes('manage-maintenance') }"
                                 >
@@ -137,14 +154,14 @@
             </router-link>
         </header>
 
-        <main :class="{ 'noc-fullscreen-main': $route.name === 'GraphView' }">
+        <main :class="{ 'noc-fullscreen-main': $route.name === 'GraphView' || $route.name === 'NocGeoMap' }">
             <router-view v-if="$root.loggedIn" />
             <Login v-if="!$root.loggedIn && $root.allowLoginDialog" />
         </main>
 
         <!-- Mobile Only -->
-        <div v-if="$root.isMobile && $route.name !== 'GraphView'" style="width: 100%; height: calc(60px + env(safe-area-inset-bottom))" />
-        <nav v-if="$root.isMobile && $root.loggedIn && $route.name !== 'GraphView'" class="bottom-nav">
+        <div v-if="$root.isMobile && $route.name !== 'GraphView' && $route.name !== 'NocGeoMap'" style="width: 100%; height: calc(60px + env(safe-area-inset-bottom))" />
+        <nav v-if="$root.isMobile && $root.loggedIn && $route.name !== 'GraphView' && $route.name !== 'NocGeoMap'" class="bottom-nav">
             <router-link to="/dashboard" class="nav-link">
                 <div><font-awesome-icon icon="tachometer-alt" /></div>
                 {{ $t("Home") }}

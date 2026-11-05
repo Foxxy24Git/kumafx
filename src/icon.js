@@ -53,6 +53,7 @@ import {
     faCertificate,
     faFolder,
     faFolderOpen,
+    faMapMarkedAlt,
     faProjectDiagram,
 } from "@fortawesome/free-solid-svg-icons";
 
@@ -104,6 +105,7 @@ library.add(
     faCertificate,
     faFolder,
     faFolderOpen,
+    faMapMarkedAlt,
     faProjectDiagram,
 );
 

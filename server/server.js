@@ -421,6 +421,12 @@ app.use(function (req, res, next) {
 
                 monitor.rabbitmqNodes = JSON.stringify(monitor.rabbitmqNodes);
 
+                if (monitor.coordinates) {
+                    monitor.coordinates = String(monitor.coordinates).trim();
+                } else {
+                    monitor.coordinates = null;
+                }
+
                 /*
                  * List of frontend-only properties that should not be saved to the database.
                  * Should clean up before saving to the database.
@@ -606,6 +612,7 @@ app.use(function (req, res, next) {
                 bean.conditions = JSON.stringify(monitor.conditions);
                 bean.manual_status = monitor.manual_status;
                 bean.system_service_name = monitor.system_service_name;
+                bean.coordinates = monitor.coordinates ? String(monitor.coordinates).trim() : null;
                 bean.expected_tls_alert = monitor.expectedTlsAlert;
                 bean.sshUsername = monitor.sshUsername;
                 bean.sshPassword = monitor.sshPassword;

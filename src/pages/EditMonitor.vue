@@ -2275,6 +2275,19 @@
                                 <div class="form-text">{{ $t("descriptionHelpText") }}</div>
                             </div>
 
+                            <!-- Coordinates -->
+                            <div class="my-3">
+                                <label for="coordinates" class="form-label">{{ $t("Coordinates") || "Coordinates" }}</label>
+                                <input
+                                    id="coordinates"
+                                    v-model="monitor.coordinates"
+                                    type="text"
+                                    class="form-control"
+                                    placeholder="-6.200000, 106.816666"
+                                />
+                                <div class="form-text">Format: latitude,longitude (contoh: -6.200000, 106.816666 untuk titik peta)</div>
+                            </div>
+
                             <div class="my-3">
                                 <tags-manager ref="tagsManager" :pre-selected-tags="monitor.tags"></tags-manager>
                             </div>
@@ -4351,6 +4364,22 @@ message HealthCheckResponse {
                     }
                 } catch (e) {
                     toast.error(this.$t("invalidURL"));
+                    return false;
+                }
+            }
+
+            if (this.monitor.coordinates) {
+                const trimmed = String(this.monitor.coordinates).trim();
+                const coordinateRegex = /^[+-]?\d+(?:\.\d+)?\s*,\s*[+-]?\d+(?:\.\d+)?$/;
+                if (!coordinateRegex.test(trimmed)) {
+                    toast.error(this.$t("CoordinatesInvalid") || "Coordinates must be in format 'latitude,longitude'");
+                    return false;
+                }
+                const parts = trimmed.split(",");
+                const lat = Number.parseFloat(parts[0].trim());
+                const lng = Number.parseFloat(parts[1].trim());
+                if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                    toast.error(this.$t("CoordinatesOutOfBounds") || "Coordinates out of bounds: latitude [-90, 90], longitude [-180, 180]");
                     return false;
                 }
             }

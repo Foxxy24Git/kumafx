@@ -205,6 +205,7 @@ class Monitor extends BeanModel {
             ntpRootDispersionThreshold: this.ntp_root_dispersion_threshold,
             ipFamily: this.ipFamily,
             expectedTlsAlert: this.expected_tls_alert,
+            coordinates: this.coordinates || null,
             sftpPath: this.sftpPath,
             sshAuthMethod: this.sshAuthMethod || "password",
 
@@ -1628,6 +1629,16 @@ class Monitor extends BeanModel {
      * @throws {Error} If validation fails
      */
     validate() {
+        if (this.coordinates) {
+            const parts = String(this.coordinates).split(",");
+            const latitude = Number.parseFloat(parts[0]?.trim());
+            const longitude = Number.parseFloat(parts[1]?.trim());
+            if (!/^[+-]?\d+(?:\.\d+)?\s*,\s*[+-]?\d+(?:\.\d+)?$/.test(String(this.coordinates).trim()) || !Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+                throw new Error("Invalid coordinates: latitude must be between -90 and 90, longitude between -180 and 180");
+            }
+            this.coordinates = `${latitude},${longitude}`;
+        }
+
         if (this.interval < MIN_INTERVAL_SECOND) {
             throw new Error(`Interval cannot be less than ${MIN_INTERVAL_SECOND} seconds`);
         }
