@@ -13,16 +13,28 @@
             >
                 {{ sidebarCollapsed ? ">" : "<" }}
             </button>
-            <div ref="map" class="geomap">
-                <button
-                    class="geomap-fullscreen-toggle"
-                    type="button"
-                    :aria-label="isFullscreen ? 'Keluar dari layar penuh' : 'Tampilkan peta layar penuh'"
-                    :title="isFullscreen ? 'Keluar dari layar penuh' : 'Tampilkan peta layar penuh'"
-                    @click.stop="toggleFullscreen"
-                >
-                    {{ isFullscreen ? "⤢" : "⛶" }}
-                </button>
+            <div ref="map" class="geomap" :class="{ 'geomap-cyber-dark': cyberDark }">
+                <div class="geomap-map-controls">
+                    <button
+                        class="geomap-theme-toggle"
+                        :class="{ active: cyberDark }"
+                        type="button"
+                        :aria-pressed="cyberDark"
+                        :title="cyberDark ? 'Gunakan peta standar' : 'Gunakan tema Cyber Dark'"
+                        @click.stop="toggleMapTheme"
+                    >
+                        {{ cyberDark ? "Standard" : "Cyber Dark" }}
+                    </button>
+                    <button
+                        class="geomap-fullscreen-toggle"
+                        type="button"
+                        :aria-label="isFullscreen ? 'Keluar dari layar penuh' : 'Tampilkan peta layar penuh'"
+                        :title="isFullscreen ? 'Keluar dari layar penuh' : 'Tampilkan peta layar penuh'"
+                        @click.stop="toggleFullscreen"
+                    >
+                        {{ isFullscreen ? "⤢" : "⛶" }}
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -31,18 +43,11 @@
 <script>
 import L from "leaflet";
 import MonitorList from "../components/MonitorList.vue";
+import { getMapThemeConfig, getStatusColor } from "../util-geomap.js";
 import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import "leaflet.markercluster";
-
-const colors = {
-    UP: "#8cb82b",
-    DOWN: "#dc2626",
-    WARN: "#eab308",
-    PAUSED: "#64748b",
-    PENDING: "#3b82f6",
-};
 
 export default {
     name: "NocGeoMap",
@@ -60,6 +65,8 @@ export default {
             groupFilter: "ALL",
             sidebarCollapsed: false,
             isFullscreen: false,
+            tileLayer: null,
+            cyberDark: localStorage.getItem("kuma_geomap_cyber_dark") === "true",
         };
     },
     computed: {
@@ -104,10 +111,7 @@ export default {
             preferCanvas: true,
         }).setView([-2.5489, 118.0149], 5);
 
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            attribution: "&copy; OpenStreetMap contributors",
-            maxZoom: 19,
-        }).addTo(this.map);
+        this.setTileLayer();
 
         this.cluster = L.markerClusterGroup({
             maxClusterRadius: 40,
@@ -116,7 +120,7 @@ export default {
                 const priority = ["DOWN", "WARN", "PENDING", "UP", "PAUSED"];
                 const statuses = cluster.getAllChildMarkers().map((marker) => marker.options.monitorStatus);
                 const status = priority.find((item) => statuses.includes(item)) || "PENDING";
-                const color = colors[status];
+                const color = getStatusColor(status, this.cyberDark);
                 return L.divIcon({
                     html: `<div style="background-color: ${color};">${cluster.getChildCount()}</div>`,
                     className: `marker-cluster marker-cluster-${status.toLowerCase()}`,
@@ -136,6 +140,22 @@ export default {
         }
     },
     methods: {
+        setTileLayer() {
+            const theme = getMapThemeConfig(this.cyberDark ? "cyberDark" : "standard");
+            if (this.tileLayer) {
+                this.map.removeLayer(this.tileLayer);
+            }
+            this.tileLayer = L.tileLayer(theme.url, {
+                attribution: theme.attribution,
+                maxZoom: theme.maxZoom,
+            }).addTo(this.map);
+        },
+        toggleMapTheme() {
+            this.cyberDark = !this.cyberDark;
+            localStorage.setItem("kuma_geomap_cyber_dark", String(this.cyberDark));
+            this.setTileLayer();
+            this.renderMarkers();
+        },
         coordinates(monitor) {
             const raw = String(monitor.coordinates || "").trim();
             if (!raw) {
@@ -197,11 +217,12 @@ export default {
                     return;
                 }
                 const isSelected = String(monitor.id) === String(this.selectedMonitorId);
+                const color = getStatusColor(status, this.cyberDark);
                 const marker = L.circleMarker(coords, {
                     radius: isSelected ? 11 : 8,
-                    color: isSelected ? "#ffd60a" : "#ffffff",
+                    color: isSelected ? "#ffd60a" : this.cyberDark ? color : "#ffffff",
                     weight: isSelected ? 3 : 2,
-                    fillColor: colors[status],
+                    fillColor: color,
                     fillOpacity: 0.9,
                     monitorStatus: status,
                 });
@@ -210,7 +231,7 @@ export default {
                 const popupContent = `
                     <div style="font-size: 13px; line-height: 1.4;">
                         <strong>${this.escape(monitor.name)}</strong>
-                        <div><span style="color:${colors[status]}; font-weight: bold;">${status}</span></div>
+                        <div><span style="color:${color}; font-weight: bold;">${status}</span></div>
                         <div>${this.escape(monitor.hostname || monitor.url || "-")}</div>
                         <div>Group: ${this.escape(groupName)}</div>
                         <div>Ping: ${pingText}</div>
@@ -327,12 +348,24 @@ export default {
     min-height: 0;
     position: relative;
     overflow: hidden;
+    isolation: isolate;
 }
 
 .geomap {
     flex: 1;
     height: 100%;
     min-width: 0;
+    position: relative;
+    z-index: 1;
+    background: #e5e7eb;
+}
+
+.geomap-cyber-dark {
+    background: #08121f;
+}
+
+.geomap-cyber-dark .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) brightness(0.7) contrast(1.15);
 }
 
 .geomap:fullscreen {
@@ -340,11 +373,36 @@ export default {
     height: 100vh;
 }
 
-.geomap-fullscreen-toggle {
+.geomap-map-controls {
     position: absolute;
     z-index: 1000;
     top: 80px;
     left: 10px;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.geomap-theme-toggle {
+    height: 34px;
+    padding: 0 0.75rem;
+    border: 2px solid rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.geomap-theme-toggle.active {
+    background: #08121f;
+    border-color: #00ff88;
+    color: #00ff88;
+}
+
+.geomap-fullscreen-toggle {
+    position: relative;
+    z-index: 1000;
     width: 34px;
     height: 34px;
     padding: 0;
@@ -362,12 +420,31 @@ export default {
     background: #f4f4f4;
 }
 
+.geomap-cyber-dark .leaflet-control-zoom a {
+    background: #08121f;
+    border-color: #164e63;
+    color: #00ff88;
+}
+
+.geomap-cyber-dark .leaflet-control-attribution {
+    background: rgba(8, 18, 31, 0.85);
+    color: #94a3b8;
+}
+
+.geomap-cyber-dark .leaflet-control-attribution a {
+    color: #00b4ff;
+}
+
 .geomap-sidebar {
     width: 480px;
     max-width: 45vw;
+    flex: 0 0 min(480px, 45vw);
+    min-width: 0;
     height: 100%;
     display: flex;
     flex-direction: column;
+    position: relative;
+    z-index: 2;
     padding: 0.5rem;
     overflow: hidden;
     background-color: var(--bs-body-bg);
@@ -378,8 +455,11 @@ export default {
 .geomap-sidebar-collapsed .geomap-sidebar {
     width: 0;
     max-width: 0;
+    min-width: 0;
+    flex: 0 0 0;
     padding: 0;
     border: 0;
+    overflow: hidden;
 }
 
 .geomap-sidebar-toggle {
