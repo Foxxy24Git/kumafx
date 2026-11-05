@@ -115,6 +115,7 @@
                 :deselect="deselect"
                 :filter-func="filterFunc"
                 :sort-func="sortFunc"
+                :on-monitor-click="onMonitorClick"
             />
         </div>
     </div>
@@ -144,6 +145,10 @@ export default {
         /** Should the scrollbar be shown */
         scrollbar: {
             type: Boolean,
+        },
+        onMonitorClick: {
+            type: Function,
+            default: null,
         },
     },
     data() {
@@ -271,7 +276,13 @@ export default {
         },
     },
     watch: {
-        searchText() {
+        searchText(value) {
+            if (this.onMonitorClick && value.trim()) {
+                const matches = Object.values(this.$root.monitorList).filter((monitor) => monitor.type !== "group" && `${monitor.name || ""} ${monitor.hostname || ""} ${monitor.url || ""}`.toLowerCase().includes(value.toLowerCase()));
+                if (matches.length === 1 && matches[0].coordinates) {
+                    this.onMonitorClick(matches[0]);
+                }
+            }
             for (let monitor of this.sortedMonitorList) {
                 if (!this.selectedMonitors[monitor.id]) {
                     if (this.selectAll) {

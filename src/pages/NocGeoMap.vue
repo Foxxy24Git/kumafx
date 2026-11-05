@@ -1,28 +1,17 @@
 <template>
     <div class="geomap-page">
-        <div class="geomap-toolbar">
-            <h1>Geo MAP</h1>
-            <span class="badge bg-secondary">{{ mappedMonitors.length }} mapped / {{ unmappedCount }} unmapped</span>
-            <input v-model.trim="search" type="search" placeholder="Search name / IP" class="form-control" />
-            <select v-model="statusFilter" class="form-select">
-                <option value="ALL">All status</option>
-                <option value="UP">UP</option>
-                <option value="DOWN">DOWN</option>
-                <option value="WARN">WARN</option>
-                <option value="PENDING">PENDING</option>
-                <option value="PAUSED">PAUSED</option>
-            </select>
-            <select v-model="groupFilter" class="form-select">
-                <option value="ALL">All groups</option>
-                <option v-for="group in groups" :key="group.id" :value="String(group.id)">{{ group.name }}</option>
-            </select>
+        <div class="geomap-content">
+            <aside class="geomap-sidebar">
+                <MonitorList :scrollbar="true" :on-monitor-click="focusMonitor" />
+            </aside>
+            <div ref="map" class="geomap"></div>
         </div>
-        <div ref="map" class="geomap"></div>
     </div>
 </template>
 
 <script>
 import L from "leaflet";
+import MonitorList from "../components/MonitorList.vue";
 import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
@@ -38,10 +27,15 @@ const colors = {
 
 export default {
     name: "NocGeoMap",
+    components: {
+        MonitorList,
+    },
     data() {
         return {
             map: null,
             cluster: null,
+            markers: new Map(),
+            selectedMonitorId: null,
             search: "",
             statusFilter: "ALL",
             groupFilter: "ALL",
@@ -97,6 +91,17 @@ export default {
         this.cluster = L.markerClusterGroup({
             maxClusterRadius: 40,
             disableClusteringAtZoom: 16,
+            iconCreateFunction: (cluster) => {
+                const priority = ["DOWN", "WARN", "PENDING", "UP", "PAUSED"];
+                const statuses = cluster.getAllChildMarkers().map((marker) => marker.options.monitorStatus);
+                const status = priority.find((item) => statuses.includes(item)) || "PENDING";
+                const color = colors[status];
+                return L.divIcon({
+                    html: `<div style="background-color: ${color};">${cluster.getChildCount()}</div>`,
+                    className: `marker-cluster marker-cluster-${status.toLowerCase()}`,
+                    iconSize: L.point(40, 40),
+                });
+            },
         });
         this.map.addLayer(this.cluster);
         this.renderMarkers();
@@ -159,6 +164,7 @@ export default {
                 return;
             }
             this.cluster.clearLayers();
+            this.markers.clear();
             this.mappedMonitors.forEach((monitor) => {
                 const beat = this.heartbeat(monitor);
                 const status = this.status(monitor);
@@ -166,12 +172,14 @@ export default {
                 if (!coords) {
                     return;
                 }
+                const isSelected = String(monitor.id) === String(this.selectedMonitorId);
                 const marker = L.circleMarker(coords, {
-                    radius: 8,
-                    color: "#ffffff",
-                    weight: 2,
+                    radius: isSelected ? 11 : 8,
+                    color: isSelected ? "#ffd60a" : "#ffffff",
+                    weight: isSelected ? 3 : 2,
                     fillColor: colors[status],
                     fillOpacity: 0.9,
+                    monitorStatus: status,
                 });
                 const groupName = this.groups.find((g) => String(g.id) === String(monitor.parent))?.name || "Ungrouped";
                 const pingText = beat && typeof beat.ping === "number" ? `${beat.ping} ms` : "N/A";
@@ -187,7 +195,34 @@ export default {
                 `;
                 marker.bindPopup(popupContent);
                 this.cluster.addLayer(marker);
+                this.markers.set(String(monitor.id), marker);
             });
+        },
+        focusMonitor(monitor) {
+            const coords = this.coordinates(monitor);
+            if (!coords) {
+                this.$root.toastError(`"${monitor.name}" belum memiliki koordinat lokasi`);
+                return;
+            }
+
+            this.selectedMonitorId = monitor.id;
+            this.renderMarkers();
+
+            this.map.setView(coords, Math.max(this.map.getZoom(), 14), {
+                animate: true,
+            });
+
+            const marker = this.markers.get(String(monitor.id));
+            if (marker) {
+                if (this.cluster.getVisibleParent) {
+                    const visibleParent = this.cluster.getVisibleParent(marker);
+                    if (visibleParent && visibleParent !== marker) {
+                        this.cluster.zoomToShowLayer(marker, () => marker.openPopup());
+                        return;
+                    }
+                }
+                marker.openPopup();
+            }
         },
         escape(value) {
             return String(value).replace(/[&<>"']/g, (char) => {
@@ -205,7 +240,7 @@ export default {
 };
 </script>
 
-<style scoped>
+<style>
 .geomap-page {
     height: calc(100vh - 90px);
     display: flex;
@@ -218,6 +253,7 @@ export default {
     gap: 0.75rem;
     padding: 0.75rem 1rem;
     flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 .geomap-toolbar h1 {
@@ -234,8 +270,54 @@ export default {
     width: auto;
 }
 
+.geomap-content {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
+}
+
 .geomap {
     flex: 1;
-    min-height: 400px;
+    height: 100%;
+    min-width: 0;
+}
+
+.geomap-sidebar {
+    width: 480px;
+    max-width: 45vw;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem;
+    overflow: hidden;
+    background-color: var(--bs-body-bg);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.geomap-sidebar .shadow-box {
+    height: 100% !important;
+    margin-bottom: 0 !important;
+    display: flex;
+    flex-direction: column;
+}
+
+@media (max-width: 991px) {
+    .geomap-content {
+        flex-direction: column;
+    }
+
+    .geomap-sidebar {
+        width: 100%;
+        max-width: 100%;
+        height: 45%;
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .geomap {
+        height: 55%;
+    }
 }
 </style>

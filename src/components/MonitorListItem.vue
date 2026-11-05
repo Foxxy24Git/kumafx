@@ -21,7 +21,16 @@
                 />
             </div>
 
-            <router-link :to="monitorURL(monitor.id)" class="item" :class="{ disabled: !monitor.active }">
+            <component
+                :is="onMonitorClick ? 'div' : 'router-link'"
+                :to="onMonitorClick ? undefined : monitorURL(monitor.id)"
+                class="item"
+                :class="{ disabled: !monitor.active }"
+                :role="onMonitorClick ? 'button' : undefined"
+                :tabindex="onMonitorClick ? 0 : undefined"
+                @click="handleMonitorClick"
+                @keydown.enter="onMonitorClick ? handleMonitorClick($event) : null"
+            >
                 <div class="row">
                     <div class="small-padding d-flex gap-2 align-items-center" :class="monitorStyle">
                         <div class="me-1">
@@ -63,7 +72,7 @@
                         <HeartbeatBar ref="heartbeatBar" size="small" :monitor-id="monitor.id" />
                     </div>
                 </div>
-            </router-link>
+            </component>
         </div>
 
         <transition name="slide-fade-up">
@@ -79,6 +88,7 @@
                     :depth="depth + 1"
                     :filter-func="filterFunc"
                     :sort-func="sortFunc"
+                    :on-monitor-click="onMonitorClick"
                 />
             </div>
         </transition>
@@ -138,6 +148,10 @@ export default {
         sortFunc: {
             type: Function,
             default: () => {},
+        },
+        onMonitorClick: {
+            type: Function,
+            default: null,
         },
     },
     data() {
@@ -315,6 +329,18 @@ export default {
          */
         monitorURL(id) {
             return getMonitorRelativeURL(id);
+        },
+        handleMonitorClick(event) {
+            if (typeof this.onMonitorClick === "function") {
+                event.preventDefault();
+                if (this.monitor.type === "group") {
+                    if (!event.target.closest(".collapse-padding")) {
+                        this.changeCollapsed();
+                    }
+                    return;
+                }
+                this.onMonitorClick(this.monitor);
+            }
         },
         /**
          * Toggle selection of monitor
